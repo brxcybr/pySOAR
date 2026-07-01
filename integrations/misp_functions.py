@@ -4,6 +4,7 @@ import os
 from pymisp import PyMISP
 from pymisp import MISPEvent
 from classes import Log
+from integrations.base import use_mock_mode
 
 MOCK_INDICATORS = {
     'ip-dst': ['203.0.113.10', '203.0.113.20', '198.51.100.5'],
@@ -12,11 +13,7 @@ MOCK_INDICATORS = {
 
 
 def _use_mock_mode(misp_init):
-    if os.environ.get('PYSOAR_MOCK_INTEGRATIONS', '').lower() in ('1', 'true', 'yes'):
-        return True
-    url = getattr(misp_init, 'url', '') or ''
-    api_key = getattr(misp_init, 'api_key', '') or ''
-    return '{' in url or '{' in api_key
+    return use_mock_mode(misp_init)
 
 
 class MispFunction:

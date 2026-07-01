@@ -1,0 +1,30 @@
+misp:
+  enabled: true
+  url: "https://{MISP_URL}"
+  api_key: "{MISP_API_KEY}"
+  ssl: false
+  verifycert: false
+  accepts:
+    - ip-dst
+    - domain
+  returns:
+    - ip-dst
+    - domain
+  playbook_functions:
+    - enable_threat_feed
+    - get_misp_event_by_type
+
+pfsense:
+  enabled: true
+  url: "http://pfsense-mock:8080"
+  api_key: "lab-test-key"
+  ssl: false
+  verifycert: false
+  default_interface: "wan"
+  accepts:
+    - ip-dst
+  returns:
+    - ip-dst
+    - pfsense-firewall-rule
+  playbook_functions:
+    - add_firewall_rule

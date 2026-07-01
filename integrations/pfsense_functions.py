@@ -4,8 +4,14 @@ import json
 import ipaddress
 from datetime import datetime, time, timezone
 from classes import Log
+from integrations.base import use_mock_mode
 import os
 import re
+
+
+def _use_mock_mode(pfsense_init):
+    return use_mock_mode(pfsense_init)
+
 
 class PfsenseFunction:
     """Class for pfSense functions."""
@@ -13,7 +19,6 @@ class PfsenseFunction:
     CERT_PATH = './certs/api_user.crt'
     CA_CERT_PATH = './certs/CA.crt'
     KEY_PATH = './certs/api_user.key'
-    # A list of optional pfsense logs
 
     def __init__(self, pfsense_init):
         """Initialize the pfSense function class."""
@@ -29,12 +34,17 @@ class PfsenseFunction:
         if not self.default_interface:
             self.default_interface = 'wan'
 
-        # Lazy initialize the API
+        self._mock = _use_mock_mode(pfsense_init)
+        self._mock_rules = []
+        self._mock_blocked_ips = set()
         self._api = None
         self._log_mgr = None
         self._rules = None
         self._interfaces = None
-        self.log.debug(f"pfSense API initialized with the following parameters: {self.__dict__}")
+        if self._mock:
+            self.log.warning("pfSense integration running in mock/offline mode")
+        else:
+            self.log.debug(f"pfSense API initialized with url={self.url} ssl={self.ssl}")
 
     # Server Functions
     def _initialize_api_session(self):
@@ -169,19 +179,46 @@ class PfsenseFunction:
 
     def get(self, endpoint):
         """Send a GET request to pfSense."""
+        if self._mock:
+            return self._mock_request('GET', endpoint)
         return self._make_request('GET', endpoint)
     
     def post(self, endpoint, data):
         """Send a POST request to pfSense."""
+        if self._mock:
+            return self._mock_request('POST', endpoint, data)
         return self._make_request('POST', endpoint, data)
     
     def put(self, endpoint, data):
         """Send a PUT request to pfSense."""
+        if self._mock:
+            return self._mock_request('PUT', endpoint, data)
         return self._make_request('PUT', endpoint, data)
 
     def delete(self, endpoint):
         """Send a DELETE request to pfSense."""
+        if self._mock:
+            return self._mock_request('DELETE', endpoint)
         return self._make_request('DELETE', endpoint, data=None)
+
+    def _mock_ok(self, body=None):
+        return ('ok', 200, 0, 'mock response', body if body is not None else {})
+
+    def _mock_request(self, method, endpoint, data=None):
+        endpoint = endpoint.lstrip('/')
+        if method == 'GET' and endpoint == 'api/v1/firewall/rule':
+            return self._mock_ok(self._mock_rules)
+        if method == 'GET' and endpoint == 'api/v1/status/system':
+            return self._mock_ok({'status': 'online', 'mock': True})
+        if method == 'POST' and endpoint == 'api/v1/firewall/rule':
+            rule = dict(data or {})
+            rule.setdefault('source', {}).setdefault('address', rule.get('source', {}).get('address', 'any'))
+            self._mock_rules.append(rule)
+            return self._mock_ok(rule)
+        if method == 'POST' and endpoint == 'api/v1/firewall/apply':
+            return self._mock_ok({'applied': True})
+        self.log.debug("Mock pfSense %s %s", method, endpoint)
+        return self._mock_ok({})
     
     # Firewall Rule Functions
     def _parse_firewall_body(self, data):
@@ -203,7 +240,11 @@ class PfsenseFunction:
             if not self.is_ip_valid(src_addr):
                 self.log.error(f"Invalid IP address: {src_addr}")
                 continue
-            if self.get_firewall_rule_by_ip(src_addr):
+            if self._mock:
+                if src_addr in self._mock_blocked_ips:
+                    self.log.info(f"IP address already blocked: {src_addr}")
+                    continue
+            elif self.get_firewall_rule_by_ip(src_addr):
                 self.log.info(f"IP address already blocked: {src_addr}")
                 continue
             if rule_action == "block":
@@ -221,6 +262,8 @@ class PfsenseFunction:
             )
             if status == "ok":
                 added += 1
+                if self._mock:
+                    self._mock_blocked_ips.add(src_addr)
 
         if added == 0:
             if any(self.is_ip_valid(a) for a in src if a != "any"):
@@ -277,6 +320,8 @@ class PfsenseFunction:
 
     def get_firewall_rule_by_ip(self, ip):
         """Get a firewall rule by IP address from pfSense."""
+        if self._mock:
+            return ip in self._mock_blocked_ips
         if self.rules is None:
             self.read_firewall_rule()
         for rule in self.rules:

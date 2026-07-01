@@ -30,7 +30,6 @@ class ConfigurationManager:
     def __init__(self):
         self._integration_mgr = None
         self._playbook_mgr = None
-        self._integration_mgr = None
         # These are set to None to indicate they are not initialized yet
         self.misp = None
         self._initialized_integrations = {}
@@ -47,27 +46,36 @@ class ConfigurationManager:
         self.log = Log.get_instance()
         
     def initialize_misp(self):
-        # Store the passed-in MISP object as a MISPFunction object
+        """Initialize MISP when the integration is enabled; otherwise return None."""
         try:
-            
             if self._integration_mgr is None:
-                self._integration_mgr = self.integration_mgr  # Ensure the Integration Manager is instantiated
-            if self.misp is None:  # Only create a new MISP object if it is None
+                self._integration_mgr = self.integration_mgr
+            if not self._misp_integration_enabled():
+                return None
+            if self.misp is None:
                 self.misp = self._integration_mgr.initialize_integration('misp')
             return self.misp
         except Exception as e:
             self.log.error(f"Error initializing MISP: {e}")
             self.log.error(f"An error occurred: {e}\n{traceback.format_exc()}")
-            raise Exception(f"Error initializing MISP: {e}")
+            return None
+
+    def _misp_integration_enabled(self):
+        try:
+            integration = Integration('misp')
+            return integration.enabled
+        except (ValueError, FileNotFoundError):
+            return False
 
     def update_enabled_items(self):
         self._enabled_integrations = self.integration_mgr.get_enabled_integrations()
         self._enabled_playbooks = self.playbook_mgr.list_enabled_playbooks()
         self._enabled_playbook_functions = self._get_enabled_playbook_functions()
-        # Now we make sure to initialize MISP if it's not already before fetching feeds
-        if self.misp is None:
-            self.misp = self.initialize_misp()
-        self._enabled_feeds = self.misp.get_enabled_feeds()
+        self.misp = self.initialize_misp()
+        if self.misp is not None:
+            self._enabled_feeds = self.misp.get_enabled_feeds()
+        else:
+            self._enabled_feeds = {}
     
     def resolve_callable(self, function_name):
         """Return the integration instance and bound method for a playbook function."""
@@ -91,14 +99,10 @@ class ConfigurationManager:
     
     # IntegrationManager Calls
     def _add_integration(self, integration_name):
-        # Calls the IntegrationManager's add_integration method
-        # Check if MISP Object is enabled
-        if not self.misp:
-            self.log.error("MISP is not initialized.")
-            return
+        misp_obj = self.initialize_misp()
         msg, functions_to_enable = self.integration_mgr.add_integration(
             integration_name,
-            self.misp,
+            misp_obj,
             self.enabled_feeds,
             self.enabled_playbook_functions,
             )
@@ -113,7 +117,7 @@ class ConfigurationManager:
             integration_name = integration_name.name
         self.integration_mgr.remove_integration(
             integration_name,
-            self.misp,
+            self.initialize_misp(),
             self.enabled_feeds,
             self.enabled_playbook_functions,
             self.enabled_playbooks,
@@ -139,15 +143,19 @@ class ConfigurationManager:
             return self._initialized_integrations[integration_name]
 
     def _initialize_enabled_feeds(self):
-        # Initialize the MISP object and get the enabled feeds
-        if self.misp is None:
-            self.misp = self.initialize_misp()
-        self._enabled_feeds = self.misp.get_enabled_feeds()
+        self.misp = self.initialize_misp()
+        if self.misp is not None:
+            self._enabled_feeds = self.misp.get_enabled_feeds()
+        else:
+            self._enabled_feeds = {}
 
     def _update_integration(self, integration_name):
         if hasattr(integration_name, 'name'):
             integration_name = integration_name.name
-        functions = self.integration_mgr.update_integration(integration_name, self.misp)
+        functions = self.integration_mgr.update_integration(
+            integration_name,
+            self.initialize_misp(),
+        )
         for function in functions:
             self._enable_playbook_function(function)
         self.update_enabled_items()
@@ -546,12 +554,19 @@ class IntegrationManager:
             integration_obj = Integration(integration_name)
             
             # Ensure the MISP feeds for the accepted data types are enabled
-            self._enable_feeds_for_integration(misp_obj, integration_obj)
+            if misp_obj is not None:
+                self._enable_feeds_for_integration(misp_obj, integration_obj)
             # update the integration's enabled status in the enabled_integrations dictionary
             self._enabled_integrations.append(integration_obj)
             
             # Notify the user which feeds and playbook functions have been enabled
-            enabled_feeds = ', '.join([feed for feed, details in feeds.items() if feed in misp_obj.FEEDS_BY_DATA_TYPE[integration_obj.name]])
+            if misp_obj is not None:
+                enabled_feeds = ', '.join([
+                    feed for feed, details in feeds.items()
+                    if feed in misp_obj.FEEDS_BY_DATA_TYPE.get(integration_obj.name, [])
+                ])
+            else:
+                enabled_feeds = ''
             enabled_functions = ', '.join([function for function in functions if function in integration_obj.playbook_functions])
             msg = self._generate_success_message(integration_obj, enabled_feeds, enabled_functions)
             return msg, list(integration_obj.playbook_functions)
@@ -567,15 +582,16 @@ class IntegrationManager:
         self.confirm_removal(integration_name, misp_obj, feeds, functions, force_removal)
 
     def _perform_removal(self, integration_name, misp_obj, feeds, functions): 
-        # 1. Disable MISP feeds
-        for data_type, details in list(feeds.items()):  # Use list to create a copy for safe iteration
-            if integration_name in details['integrations']:  # Assuming that 'integrations' is a list of integration names associated with the feed
-                if len(details['integrations']) == 1:  # This is the only integration using the feed
-                    feed_id = details['feed_id']
-                    misp_obj.disable_threat_feed(feed_id)
-                    del feeds[data_type]  # Remove the feed from the dictionary
-                else:
-                    details['integrations'].remove(integration_name)  # Remove this integration from the feed's list
+        # 1. Disable MISP feeds when MISP is available
+        if misp_obj is not None:
+            for data_type, details in list(feeds.items()):
+                if integration_name in details['integrations']:
+                    if len(details['integrations']) == 1:
+                        feed_id = details['feed_id']
+                        misp_obj.disable_threat_feed(feed_id)
+                        del feeds[data_type]
+                    else:
+                        details['integrations'].remove(integration_name)
 
         # 2. Remove from enabled_integrations
         self._enabled_integrations = [
@@ -606,7 +622,8 @@ class IntegrationManager:
             integration_obj = self._get_integration_obj_by_name(integration_name)
             
         # Ensure the MISP feeds for the accepted data types are enabled
-        self._enable_feeds_for_integration(misp_obj, integration_obj)
+        if misp_obj is not None:
+            self._enable_feeds_for_integration(misp_obj, integration_obj)
         self.log.info(f"{integration_name} integration has been updated with current feeds and configurations.")
         
         # Notify the user which feeds and playbook functions have been enabled
@@ -685,12 +702,15 @@ class IntegrationManager:
         return None
 
     def _enable_feeds_for_integration(self, misp_obj, integration_obj):
+        if misp_obj is None:
+            return
         for data_type in integration_obj.accepts:
             misp_obj.ensure_feed_enabled(data_type)
 
     def _generate_removal_warning(self, integration_name, feeds_to_remove, functions_to_remove, playbooks_to_remove):
         warning = f"WARNING: Removing the '{integration_name}' integration will disable the following:\n" 
-        warning += f"MISP FEEDS:\n\t{', '.join(feeds_to_remove)}"
+        if feeds_to_remove:
+            warning += f"MISP FEEDS:\n\t{', '.join(feeds_to_remove)}"
         warning += f"\nPLAYBOOK FUNCTIONS:\n\t{', '.join(functions_to_remove)}"
         warning += f"\nPLAYBOOKS:\n\t{', '.join(playbooks_to_remove)}"
         warning += "\nAre you sure you want to remove this integration? (y/n): "
@@ -698,7 +718,8 @@ class IntegrationManager:
 
     def _generate_success_message(self, integration_obj, feeds, functions):
         success_msg = f"The {integration_obj.name} integration has been successfully added. The following features are now enabled:\n"
-        success_msg += f"MISP FEEDS:\n\t{', '.join(feeds)}"
+        if feeds:
+            success_msg += f"MISP FEEDS:\n\t{', '.join(feeds)}\n"
         success_msg += f"PLAYBOOK FUNCTIONS:\n\t{', '.join(functions)}\n"
         return success_msg
 

@@ -166,6 +166,7 @@ certs/*
 config/misp.yaml
 config/pfsense.yaml
 secrets/
+lab/.env
 README_LOCAL.md 
 feeds/
 playbooks/*

@@ -1,0 +1,34 @@
+services:
+  pysoar:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - ../config:/app/config
+      - ../playbooks:/app/playbooks
+      - pysoar-secrets:/app/secrets
+    environment:
+      PYSOAR_MOCK_INTEGRATIONS: ${PYSOAR_MOCK_INTEGRATIONS:-1}
+      PYSOAR_MASTER_KEY: ${PYSOAR_MASTER_KEY:-}
+      PYSOAR_SECRETS_DIR: /app/secrets
+    depends_on:
+      pfsense-mock:
+        condition: service_healthy
+    command: ["--run-playbook", "test", "--once"]
+    profiles: ["lab", "default"]
+
+  pfsense-mock:
+    build:
+      context: ./mocks/pfsense
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles: ["lab", "default"]
+
+volumes:
+  pysoar-secrets:

@@ -2,6 +2,23 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.4.0] - 2026-07-01
+
+### Added
+- FastAPI REST API (`api_server.py`) with playbook run, validate, health, and scheduler endpoints
+- Background playbook scheduler (`scheduler.py`) with CLI `--scheduler` flag
+- Full Docker lab profile: MISP, CrowdSec, and webhook mock services + `pysoar-api`
+- `lab/scripts/seed-misp.sh` and `lab/scripts/generate-certs.sh`
+- Ansible bootstrap playbook (`lab/ansible/`)
+- GNS3 topology documentation (`docs/lab/gns3-topology.md`)
+- `requirements-api.txt` optional dependencies
+- API and scheduler tests
+
+### Changed
+- `lab/docker-compose.yml` extended with `--profile full`
+- Bootstrap script supports `LAB_PROFILE=full`
+- Makefile targets: `lab-full-up`, `lab-full-down`, `lab-seed-misp`, `lab-certs`
+
 ## [0.3.0] - 2026-07-01
 
 ### Added

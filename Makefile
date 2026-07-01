@@ -24,5 +24,16 @@ lab-down:
 lab-logs:
 	docker compose -f lab/docker-compose.yml --profile lab logs -f
 
+lab-full-up:
+	LAB_PROFILE=full $(MAKE) bootstrap
+	docker compose -f lab/docker-compose.yml --profile full up -d --build
+	bash lab/scripts/wait-healthy.sh pfsense-mock 90
+
+lab-full-down:
+	docker compose -f lab/docker-compose.yml --profile full down -v
+
+lab-seed-misp:
+	bash lab/scripts/seed-misp.sh
+
 docker-build:
 	docker build -t pysoar:local .

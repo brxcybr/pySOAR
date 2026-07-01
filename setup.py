@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pysoar",
-    version="0.3.0",
+    version="0.4.0",
     description="A lightweight Python SOAR framework for edge and SOHO networks",
     packages=find_packages(),
     py_modules=[
@@ -12,6 +12,8 @@ setup(
         "secrets_manager",
         "triggers",
         "playbook_validator",
+        "scheduler",
+        "api_server",
     ],
     python_requires=">=3.10",
     install_requires=[

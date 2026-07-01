@@ -6,6 +6,10 @@ cd "$ROOT"
 
 CONFIG_DIR="${PYSOAR_CONFIG_DIR:-$ROOT/config}"
 LAB_CONFIG="$ROOT/lab/config/lab.yaml"
+if [[ "${LAB_PROFILE:-}" == "full" ]]; then
+  LAB_CONFIG="$ROOT/lab/config/full.yaml"
+  echo "Using full lab profile configs"
+fi
 SECRETS_DIR="${PYSOAR_SECRETS_DIR:-$ROOT/secrets}"
 
 mkdir -p "$CONFIG_DIR" "$SECRETS_DIR"

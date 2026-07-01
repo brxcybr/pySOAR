@@ -71,6 +71,33 @@ def parse_arguments():
         action='store_true',
         help='With --init-secrets, overwrite an existing master key file',
     )
+    parser.add_argument(
+        '--serve-api',
+        action='store_true',
+        help='Start the FastAPI REST server instead of the TUI',
+    )
+    parser.add_argument(
+        '--host',
+        default='127.0.0.1',
+        help='Host for --serve-api (default: 127.0.0.1)',
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=8088,
+        help='Port for --serve-api (default: 8088)',
+    )
+    parser.add_argument(
+        '--scheduler',
+        metavar='PLAYBOOK',
+        help='Run a playbook on an interval in the foreground scheduler',
+    )
+    parser.add_argument(
+        '--interval',
+        type=int,
+        default=300,
+        help='Scheduler interval in seconds (default: 300)',
+    )
     return parser.parse_args()
 
 
@@ -150,6 +177,27 @@ def list_playbooks_cli():
     return 0
 
 
+def serve_api_cli(host='127.0.0.1', port=8088):
+    from api_server import serve
+    log.info(f"Starting PySOAR API on {host}:{port}")
+    serve(host=host, port=port)
+    return 0
+
+
+def scheduler_cli(playbook_name, interval=300, once=False):
+    from scheduler import PlaybookScheduler
+
+    config_mgr = ConfigurationManager()
+    sched = PlaybookScheduler(config_mgr)
+    sched.schedule_interval(playbook_name, interval, once=once)
+    log.info(
+        f"Scheduler running playbook '{playbook_name}' every {interval}s "
+        "(Ctrl+C to stop)"
+    )
+    sched.run_forever()
+    return 0
+
+
 def main(stdscr):
     try:
         Menu().run(stdscr)
@@ -173,6 +221,10 @@ def main_cli():
         sys.exit(set_secret_cli(args.set_secret, api_key=args.api_key))
     if args.list_playbooks:
         sys.exit(list_playbooks_cli())
+    if args.serve_api:
+        sys.exit(serve_api_cli(host=args.host, port=args.port))
+    if args.scheduler:
+        sys.exit(scheduler_cli(args.scheduler, interval=args.interval, once=args.once))
     if args.run_playbook:
         sys.exit(run_playbook_cli(args.run_playbook, once=args.once))
 

@@ -1,0 +1,61 @@
+---
+- name: Bootstrap PySOAR lab host
+  hosts: pysoar_hosts
+  become: true
+  vars:
+    pysoar_repo: "{{ lookup('env', 'PYSOAR_REPO') | default('https://github.com/brxcybr/pySOAR.git', true) }}"
+    pysoar_dir: /opt/pysoar
+  tasks:
+    - name: Install Docker prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - git
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+        update_cache: true
+
+    - name: Install Docker engine
+      apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Ensure docker service running
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Clone or update PySOAR
+      git:
+        repo: "{{ pysoar_repo }}"
+        dest: "{{ pysoar_dir }}"
+        version: main
+        force: false
+
+    - name: Copy lab environment file
+      copy:
+        src: "{{ pysoar_dir }}/lab/.env.example"
+        dest: "{{ pysoar_dir }}/lab/.env"
+        remote_src: true
+        force: false
+
+    - name: Bootstrap lab configs
+      command: make bootstrap
+      args:
+        chdir: "{{ pysoar_dir }}"
+
+    - name: Start Docker lab stack
+      command: make lab-up
+      args:
+        chdir: "{{ pysoar_dir }}"
+
+    - name: Run lab smoke test
+      command: make lab-test
+      args:
+        chdir: "{{ pysoar_dir }}"

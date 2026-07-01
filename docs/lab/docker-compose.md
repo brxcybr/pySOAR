@@ -11,6 +11,28 @@ The Docker lab provides a one-command test environment without GNS3 or a real pf
 
 By default `PYSOAR_MOCK_INTEGRATIONS=1` so MISP and pfSense both use in-process mocks inside the PySOAR container. The pfSense mock container is available for HTTP-level integration testing when mock env is disabled.
 
+### Full profile
+
+Start all mock services plus the REST API:
+
+```bash
+make lab-full-up
+curl http://127.0.0.1:8088/health
+make lab-full-down
+```
+
+Services in `--profile full`:
+
+| Service | Port | Purpose |
+|---|---|---|
+| `pysoar-api` | 8088 | FastAPI REST server |
+| `pfsense-mock` | 8080 | pfSense API stub |
+| `misp-mock` | 8082 | MISP API stub |
+| `crowdsec-mock` | 8081 | CrowdSec LAPI stub |
+| `webhook-sink` | 9000 | Webhook receiver |
+
+Use `LAB_PROFILE=full make bootstrap` to install `lab/config/full.yaml` integration configs.
+
 ## Quick start
 
 ```bash

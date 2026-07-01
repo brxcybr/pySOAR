@@ -16,6 +16,9 @@ from integrations.dispatch import (
     merge_result,
     is_success,
 )
+from playbook_validator import validate_playbook, format_validation_result
+from integrations.health import check_playbook_integrations, summarize_health
+from triggers import wait_for_trigger, sync_trigger_dict
 # Globally disable SSL warnings (for self-signed certs)
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -105,24 +108,18 @@ class ConfigurationManager:
         self.log.warning(msg)
 
     def _remove_integration(self, integration_name):
-        # Check if the integration exists in the enabled_playbooks dictionary
-        if integration_name in self._enabled_playbooks:
-            for playbook in self._enabled_playbooks[integration_name]:
-                try:
-                    self._disable_playbook(playbook)
-                except Exception as e:
-                    self.log.error(f"Error disabling playbook {playbook}: {e}")
-                    return 
-            # Only after successful removal, call the IntegrationManager to remove the integration
-            self.integration_mgr.remove_integration(
-                integration_name, 
-                self.misp, 
-                self.enabled_feeds, 
-                self.enabled_playbook_functions, 
-                self.enabled_playbooks
-            )
-            self.update_enabled_items()
-            self.log.info(f"The {integration_name} integration has been successfully removed.")
+        if hasattr(integration_name, 'name'):
+            integration_name = integration_name.name
+        self.integration_mgr.remove_integration(
+            integration_name,
+            self.misp,
+            self.enabled_feeds,
+            self.enabled_playbook_functions,
+            self.enabled_playbooks,
+            force_removal=True,
+        )
+        self.update_enabled_items()
+        self.log.info(f"The {integration_name} integration has been successfully removed.")
 
     def _initialize_integration(self, integration_name):
             """
@@ -147,6 +144,8 @@ class ConfigurationManager:
         self._enabled_feeds = self.misp.get_enabled_feeds()
 
     def _update_integration(self, integration_name):
+        if hasattr(integration_name, 'name'):
+            integration_name = integration_name.name
         functions = self.integration_mgr.update_integration(integration_name, self.misp)
         for function in functions:
             self._enable_playbook_function(function)
@@ -192,14 +191,15 @@ class ConfigurationManager:
             if force_stop:
                 playbook.stop()
             else:
-                self.log.error(f"Cannot disable playbook {playbook_name} while it is running. Please stop the playbook and try again.")
-                return  # Exiting the method since we cannot disable a running playbook without force_stop
-        # The condition to check if the playbook is in the list has been moved down to after we have possibly stopped it
-        if playbook_name in self._enabled_playbooks:
-            del self._enabled_playbooks[playbook_name]
-            self.log.info(f"Playbook {playbook_name} has been disabled.")
-        else:
-            self.log.error(f"No enabled playbook found with the name: {playbook_name}")
+                self.log.error(
+                    f"Cannot disable playbook {playbook_name} while it is running. Please stop the playbook and try again."
+                )
+                return
+        playbook.enabled = False
+        playbook.update()
+        self.playbook_mgr.update_playbook_data(playbook_name, playbook.data)
+        self.playbook_mgr.save_playbook(playbook_name)
+        self.log.info(f"Playbook {playbook_name} has been disabled.")
 
     def _scan_configs(self):
         return [
@@ -331,10 +331,8 @@ class Integration:
         self._params[self._name]['verifycert'] = self._verifycert
         self._params[self._name]['accepts'] = self._accepts
         self._params[self._name]['returns'] = self._returns
-        self._params[self._name]['playbook_functions'] = self._playbook_functions        
-        # Send the updated parameters to the Integration Manager
-        self.integration_mgr.update_integration(self._name, self._params)
-        self.log.info(f"Integration {self._name} has been updated.")
+        self._params[self._name]['playbook_functions'] = self._playbook_functions
+        self.log.info(f"Integration {self._name} parameters updated in memory.")
         
     def _pack_data(self):
         """Serialize the data into a dictionary."""
@@ -595,6 +593,13 @@ class IntegrationManager:
             if file.endswith('.yaml') and not file.endswith('.template.yaml')
         ]
 
+    def scan_integration_templates(self):
+        return [
+            file.replace('.template.yaml', '')
+            for file in os.listdir(self.CONFIG_PATH)
+            if file.endswith('.template.yaml')
+        ]
+
     def save(self, integration_obj):
         """Saves all an integration object to disk in the correct format"""
         # Ensure that integration object data is updated 
@@ -697,7 +702,7 @@ class PlaybookManager:
         return [playbook_name for playbook_name in self.playbooks_data.keys()
             if self.playbooks_data[playbook_name].get('is_running')]
         
-    def launch_playbook(self, playbook_name, config_mgr, once=False, max_cycles=None):
+    def launch_playbook(self, playbook_name, config_mgr, once=False, max_cycles=None, skip_validation=False):
         """Execute playbook logic. Set once=True to stop after one full cycle."""
         if isinstance(playbook_name, Playbook):
             playbook_name = playbook_name.name
@@ -723,6 +728,17 @@ class PlaybookManager:
             self.log.error(f"Playbook {playbook_name} has no executable logic.")
             return False
 
+        if not skip_validation:
+            validation = validate_playbook(playbook, config_mgr)
+            if not validation.is_valid:
+                self.log.error(format_validation_result(validation))
+                raise Exception(f"Playbook {playbook_name} failed validation.")
+
+            health = check_playbook_integrations(config_mgr, playbook)
+            if any(not item.healthy for item in health):
+                self.log.error(summarize_health(health))
+                raise Exception(f"Playbook {playbook_name} failed integration health checks.")
+
         first = playbook.logic[0]
         if first.data_dependencies and first.name not in ('get_misp_event_by_type',):
             from integrations.dispatch import PRODUCER_FUNCTIONS
@@ -737,6 +753,7 @@ class PlaybookManager:
         current_function = playbook.logic[0]
         playbook.is_running = True
         playbook.clear_stop()
+        config_mgr._active_playbook = playbook
 
         try:
             while current_function.name != "halt_playbook":
@@ -776,6 +793,7 @@ class PlaybookManager:
             raise
         finally:
             playbook.is_running = False
+            config_mgr._active_playbook = None
 
         self.log.info(
             f"Playbook {playbook.name} finished after {iteration} step(s), {cycles} cycle(s)."
@@ -825,26 +843,14 @@ class PlaybookManager:
         else:
             self.log.info(f"Playbook {name} is already disabled or does not exist.")
 
-    def _delete_playbook(self, name):
-        """
-        Delete a playbook's YAML file after seeking user confirmation.
-        NOTE: Ensure any references to the playbook elsewhere are also cleaned up.
-        """
-        filename = os.path.join(self.PLAYBOOK_DIR, name + '.yaml')
+    def delete_playbook(self, playbook_name):
+        """Delete a playbook YAML file and remove it from cache."""
+        filename = os.path.join(self.PLAYBOOK_DIR, playbook_name + '.yaml')
         if os.path.exists(filename):
-            choice = self._get_user_input(f"Are you sure you want to delete the playbook {name}? This cannot be undone. (yes/no): ")
-            if choice.lower() == 'yes':
-                try:
-                    os.remove(filename)
-                    # Remove from the internal cache if present
-                    self.playbooks_data.pop(name, None)
-                    self.log.info(f"Playbook {name} has been deleted.")
-                except Exception as e:
-                    self.log.error(f"Error deleting playbook {name}: {e}")
-            else:
-                self.log.info("Playbook deletion cancelled.")
-        else:
-            self.log.info(f"Playbook {name} does not exist.")
+            os.remove(filename)
+        self.playbooks_data.pop(playbook_name, None)
+        self._playbook_names = [n for n in self.playbook_names if n != playbook_name]
+        self.log.info(f"Playbook {playbook_name} deleted.")
 
     def create_playbook(self, playbook_name):
         # Check if the playbook already exists
@@ -1156,10 +1162,16 @@ class PlaybookFunction:
         if self.name == "halt_playbook":
             return shared_data, self.name
 
-        if self.trigger_type == 'time' and self.trigger_duration:
-            time.sleep(self.trigger_duration)
-        elif self.trigger_type == 'continuous':
-            pass
+        sync_trigger_dict(self)
+        should_run = wait_for_trigger(
+            self,
+            shared_data=shared_data,
+            config_mgr=config_mgr,
+            playbook=getattr(config_mgr, '_active_playbook', None),
+        )
+        if not should_run:
+            self.log.info(f"Function {self.name} skipped; trigger condition not met.")
+            return shared_data, self.on_fail
 
         from integrations.dispatch import PRODUCER_FUNCTIONS
         if self.data_dependencies and self.name not in PRODUCER_FUNCTIONS:

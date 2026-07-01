@@ -58,7 +58,7 @@ class TestPlaybookExecution(unittest.TestCase):
         }
 
         config_mgr = ConfigurationManager()
-        result = mgr.launch_playbook("test", config_mgr, once=True)
+        result = mgr.launch_playbook("test", config_mgr, once=True, skip_validation=True)
         self.assertTrue(result)
 
 

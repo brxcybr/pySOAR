@@ -43,10 +43,10 @@ class TestConfigurationManager(unittest.TestCase):
         )
 
     def test_remove_integration_no_matching_playbooks(self):
-        self.config_manager._enabled_playbooks = {}
         self.config_manager.integration_mgr.remove_integration = MagicMock()
+        self.config_manager.update_enabled_items = MagicMock()
         self.config_manager._remove_integration('test_integration')
-        self.config_manager.integration_mgr.remove_integration.assert_not_called()
+        self.config_manager.integration_mgr.remove_integration.assert_called_once()
 
 
 if __name__ == '__main__':

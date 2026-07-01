@@ -1,4 +1,7 @@
 from classes import ConfigurationManager, Integration, Log, Playbook, PlaybookFunction
+from playbook_validator import validate_playbook, format_validation_result
+from integrations.health import check_playbook_integrations, summarize_health
+from triggers import sync_trigger_dict
 import curses
 import traceback
 
@@ -204,7 +207,9 @@ class Menu:
             return
         try: 
             self.current_header += '\nPLAYBOOK>>> (VISUALIZE)'
-            self.current_playbook.visualize() # Call the visualize method on the playbook
+            if isinstance(self.current_playbook, str):
+                self.current_playbook = Playbook(self.current_playbook)
+            self.current_header += self.current_playbook.visualize()
         except Exception as e:
             self.current_header += '\nPLAYBOOK>>> (VISUALIZE) (ERROR)'
             self.log.error(f"Error visualizing playbook: {e}")
@@ -225,6 +230,7 @@ class Menu:
             self.log.debug(f"Sending user to the select playbook menu.")
             self.menu_stack.append(self.current_menu)
             self.current_menu = self.select_playbook_menu
+            self.select_playbook_menu()
         # User chose to go back or an error occurred
         if not self.current_playbook:
             self.log.debug(f"User chose to go back or an error occurred.")
@@ -252,8 +258,8 @@ class Menu:
             elif key == curses.KEY_ENTER or key in [10, 13]:
                 if self.current_option == 0: # 1. VIEW LOGIC
                     if self.current_playbook.logic:
-                        self.current_playbook.display() # If there is only one playbook, just display it
-                    else: 
+                        self.current_header += f"\n{self.current_playbook.visualize()}"
+                    else:
                         self.current_header += '\n\nNO LOGIC TO DISPLAY'
                         continue
                 elif self.current_option == 1:  # 2. ADD AN ACTION
@@ -326,7 +332,7 @@ class Menu:
 
         self.clear_and_refresh()
         self.current_header += '\n\nSELECT A PLAYBOOK: '
-        playbooks = self.playbook_mgr.playbook_names()
+        playbooks = self.playbook_mgr.playbook_names
         options = playbooks.copy()
         options.append('RETURN TO MAIN MENU')
         self.current_option = 0
@@ -364,15 +370,18 @@ class Menu:
             self.menu_stack.append(self.current_menu)
             self.current_menu = self.select_function_menu # Retrieve data from the playbook
             self.select_function_menu()
+            if not self.current_function:
+                self.current_menu = self.menu_stack.pop()
+                return
 
         self.build_header() # Update the header
         self.clear_and_refresh() # Clear and refresh the screen
 
         # Return to the previous menu if the user chose to go back
-        if self.current_function == len(self.config_mgr.enabled_playbook_functions) - 1:
-            self.log.debug(f"Use chose to return to previous menu.")
+        if self.current_function == 'BACK':
+            self.log.debug("User chose to return to previous menu.")
             self.current_menu = self.menu_stack.pop()
-            return 
+            return
         
         # Get the integration name from the function name
         self.current_function = PlaybookFunction(self.current_function)
@@ -446,24 +455,36 @@ class Menu:
             return
             
         elif action == 'modify':
+            replace_index = None
             if len(self.current_playbook.logic) == 1:
+                replace_index = 0
                 self.current_function = self.current_playbook.logic[0]
             else:
-                # Generate a list of the playbook's functions and let the user choose which one to modify
                 self.current_header += '\n\nSELECT AN ACTION TO MODIFY: '
                 self.menu_stack.append(self.current_menu)
                 self.current_menu = self.select_function_from_playbook
                 self.select_function_from_playbook()
                 if not self.current_function:
-                    self.log.error(f"Error modifying function from playbook {self.current_playbook.name}: No function selected.")
+                    self.log.error(
+                        f"Error modifying function from playbook {self.current_playbook.name}: No function selected."
+                    )
                     self.current_menu = self.menu_stack.pop()
-                    return   # Return to the previous menu
-            # Send the user to the select trigger menu to finish modifying the function
+                    return
+                replace_index = next(
+                    (
+                        idx for idx, func in enumerate(self.current_playbook.logic)
+                        if func is self.current_function
+                    ),
+                    None,
+                )
+            original = self.current_function
+            self.current_function = PlaybookFunction(original.name)
             self.menu_stack.append(self.current_menu)
             self.current_menu = self.select_data_dependencies_menu
-            self.select_data_dependencies_menu() 
-            
-            # Return to the previous menu
+            self.select_data_dependencies_menu()
+            if replace_index is not None:
+                self.current_playbook.replace_playbook_function(replace_index, self.current_function)
+            self.try_to_update_playbook()
             self.current_function = None
             self.current_menu = self.menu_stack.pop()
             return
@@ -479,15 +500,20 @@ class Menu:
         self.current_header += f"\n\tFUNCTIONS: {[function_name for function_name in self.current_playbook.get_unique_functions()]}"
         self.current_header += f"\n\tINTEGRATION_DEPENDENCIES: {[integration_name for integration_name in self.current_playbook.integration_deps]}"
         self.current_header += f"\n\tLOGIC: {self.current_playbook.visualize()}"
+        validation = validate_playbook(self.current_playbook, self.config_mgr)
+        self.current_header += f"\n\tVALIDATION:\n{format_validation_result(validation)}"
         self.current_header += f"\n\nIS THIS CORRECT? "
         correct = self.yes_or_no_menu()
         if correct:
+            if not validation.is_valid:
+                self.current_header += '\n\nPLAYBOOK HAS VALIDATION ERRORS'
+                self.log.error(format_validation_result(validation))
+                return
             self.current_header = self.playbook_header
             self.current_menu = self.exit_playbook_menu
             self.exit_playbook_menu()
         else:
-            self.current_menu = self.playbook_editor_menu
-            self.playbook_editor_menu()
+            self.playbook_editor_menu(new=False)
         return            
     
     def try_to_update_playbook(self):
@@ -569,7 +595,7 @@ class Menu:
                         self.log.debug(f"User selected halt_playbook.")
                         self.current_menu = self.menu_stack.pop()
                         return
-                elif selected_option in range(1, len(functions) - 1):
+                elif selected_option in range(1, len(options) - 1):
                     # Set the selected function and return to previous menu
                     self.current_function = options[selected_option]
                     self.log.debug(f"User selected function {self.current_function}.")
@@ -647,16 +673,31 @@ class Menu:
                 selected_option = self.current_option
                 if selected_option == 0:  # CONTINUOUS
                     self.current_function.trigger_type = 'always'
-                    self.log.debug(f"User selected continuous trigger.")
-                    
+                    sync_trigger_dict(self.current_function)
+                    self.log.debug("User selected continuous trigger.")
+
                 elif selected_option == 1:  # TIME INTERVAL
                     self.current_function.trigger_type = 'time'
                     self.current_function.trigger_duration = self.get_user_input_for_time_interval()
-                    self.log.debug(f"User selected time interval of {self.current_function.trigger_duration} seconds.")
-                    
-                elif selected_option == 2:  # CONDITION (Not implemented)
-                    self.stdscr.addstr("\nCONDITION trigger is not supported yet.\n")
-                    continue
+                    sync_trigger_dict(self.current_function)
+                    self.log.debug(
+                        f"User selected time interval of {self.current_function.trigger_duration} seconds."
+                    )
+
+                elif selected_option == 2:  # CONDITION
+                    self.current_function.trigger_type = 'condition'
+                    self.current_function.trigger = {
+                        'type': 'condition',
+                        'condition': {
+                            'type': 'shared_data_present',
+                            'key': 'ip-dst',
+                            'mode': 'wait',
+                            'timeout': 300,
+                            'poll_interval': 5,
+                        },
+                    }
+                    sync_trigger_dict(self.current_function)
+                    self.log.debug("User selected condition trigger (ip-dst present).")
                 
                 elif selected_option == 3:  # BACK (Go back to playbook_editor_menu)
                     self.current_function = None
@@ -701,7 +742,7 @@ class Menu:
         
         # Handle what to do if the user chose to loop or execute next action
         if self.current_function.on_success == 'halt_playbook':
-            # User is done building their playbook and is ready to save and exit
+            self.current_playbook.add_playbook_function(self.current_function)
             final_func = PlaybookFunction('halt_playbook', trigger={'type': 'always'})
             self.current_playbook.add_playbook_function(final_func)
         else:
@@ -846,9 +887,10 @@ class Menu:
             self.config_mgr.update_enabled_items()
         # Reset the current_playbook variable
         self.current_playbook = None
-        self.menu_stack = [self.menu_stack[0]] # Reset the menu stack
+        if self.menu_stack:
+            self.menu_stack = [self.menu_stack[0]]
         self.current_menu = self.main_menu
-        self.main_menu() # Return to the main menu
+        self.main_menu()
     
     # Helper Functions
     def get_user_input_for_time_interval(self):
@@ -879,14 +921,26 @@ class Menu:
             if self.current_playbook.is_running:
                 self.current_header += '\n\nPLAYBOOK IS ALREADY RUNNING'
             else:
-                try:
-                    self.playbook_mgr.launch_playbook(self.current_playbook.name, self.config_mgr, once=True)
-                    self.try_to_update_playbook()
-                    self.log.info(f"Launched playbook {self.current_playbook.name}")
-                except Exception as e:
-                    self.current_header += '\n\nERROR LAUNCHING PLAYBOOK'
-                    self.log.error(f"Error launching playbook {self.current_playbook.name}: {e}")
-                    self.log.error(f"An error has occurred: {traceback.format_exc()}")
+                validation = validate_playbook(self.current_playbook, self.config_mgr)
+                if not validation.is_valid:
+                    self.current_header += '\n\nPLAYBOOK VALIDATION FAILED'
+                    self.log.error(format_validation_result(validation))
+                else:
+                    health = check_playbook_integrations(self.config_mgr, self.current_playbook)
+                    if any(not item.healthy for item in health):
+                        self.current_header += '\n\nINTEGRATION HEALTH CHECK FAILED'
+                        self.log.error(summarize_health(health))
+                    else:
+                        try:
+                            self.playbook_mgr.launch_playbook(
+                                self.current_playbook.name, self.config_mgr, once=True
+                            )
+                            self.try_to_update_playbook()
+                            self.log.info(f"Launched playbook {self.current_playbook.name}")
+                        except Exception as e:
+                            self.current_header += '\n\nERROR LAUNCHING PLAYBOOK'
+                            self.log.error(f"Error launching playbook {self.current_playbook.name}: {e}")
+                            self.log.error(f"An error has occurred: {traceback.format_exc()}")
         else:
             self.log.error(f"Error launching playbook: No playbook selected.")
 
@@ -935,26 +989,27 @@ class Menu:
     def remove_playbook_menu(self):
         # Update the header, then jump to select playbook menu
         self.current_header += '\nPLAYBOOK>>> (REMOVE)'
+        self.menu_stack.append(self.current_menu)
         self.current_menu = self.select_playbook_menu
         self.select_playbook_menu()
         if self.current_playbook is None:
-            self.current_menu = self.menu_stack.pop() # If the user chose to go back or an error occurred
+            self.current_menu = self.menu_stack.pop() if self.menu_stack else self.main_menu
             return
-        else:
-            # Remove the playbook from the playbook manager
-            self.log.debug(f"User chose to remove playbook {self.current_playbook.name}")
+        if isinstance(self.current_playbook, str):
+            self.current_playbook = Playbook(self.current_playbook)
+        self.current_header += f"\n\nDELETE PLAYBOOK {self.current_playbook.name}? "
+        confirm = self.yes_or_no_menu()
+        if confirm:
             try:
-                self.config_mgr._disable_playbook(self.current_playbook.name)
-                # Update the playbook data in memory and the global cache
-                self.try_to_update_playbook()
-                self.playbook_mgr.update_playbook_data(self.current_playbook.name, self.current_playbook.data)
+                self.playbook_mgr.delete_playbook(self.current_playbook.name)
+                self.current_header += f"\n\nPLAYBOOK {self.current_playbook.name} REMOVED"
             except Exception as e:
                 self.current_header += '\n\nERROR REMOVING PLAYBOOK'
                 self.log.error(f"Error removing playbook {self.current_playbook.name}: {e}")
-                # Log traceback data
                 self.log.error(f"An error has occurred: {traceback.format_exc()}")
-            self.current_menu = self.menu_stack.pop()
-            return
+        self.current_playbook = None
+        self.current_menu = self.menu_stack.pop() if self.menu_stack else self.main_menu
+        return
         
     # Configuration 
     def configuration_menu(self):
@@ -1006,41 +1061,40 @@ class Menu:
         """Submenu for adding or removing an integration"""
         self.menu_stack.append(self.current_menu)
         self.current_menu = self.select_integration
-        self.select_integration()
-        # Initialize the integration
+        self.select_integration(new=(action == 'add'))
+        if not self.current_integration:
+            self.current_menu = self.menu_stack.pop()
+            return
+
         self.current_integration = Integration(self.current_integration)
-        # Process based on which option the user selected
-        if action == 'add': # User wants to enabled a currently disabled integration 
+
+        if action == 'add':
             self.log.debug(f"User chose to add integration {self.current_integration.name}")
             confirm = self.confirm_integration_options(warning=False)
             if confirm:
                 self.config_mgr._add_integration(self.current_integration.name)
                 self.config_mgr.update_enabled_items()
-            self.current_menu = self.menu_stack.pop()
-            return
-        elif action == 'remove': 
+        elif action == 'remove':
             self.log.debug(f"User chose to remove integration {self.current_integration.name}")
             confirm = self.confirm_integration_options(warning=True)
-            if confirm: # User chose to remove the integration
-                self.config_mgr._remove_integration(self.current_integration)
+            if confirm:
+                self.config_mgr._remove_integration(self.current_integration.name)
                 self.config_mgr.update_enabled_items()
-            self.current_menu = self.menu_stack.pop()
-            return
         elif action == 'edit':
             self.log.debug(f"User chose to edit integration {self.current_integration.name}")
             self.menu_stack.append(self.current_menu)
             self.current_menu = self.update_integration
             self.update_integration()
             confirm = self.confirm_integration_options(warning=True)
-            if confirm: # User chose to edit the integration
-                self.config_mgr._update_integration(self.current_integration)
+            if confirm:
+                self.config_mgr.integration_mgr.save(self.current_integration)
+                self.config_mgr._update_integration(self.current_integration.name)
                 self.config_mgr.update_enabled_items()
-            self.current_menu = self.menu_stack.pop()
-            return # Return to previous menu
         else:
             self.log.error(f"Error editing integration: Invalid action {action}")
-            self.current_menu = self.menu_stack.pop()
-            return # Return to previous menu
+
+        self.current_menu = self.menu_stack.pop()
+        return
         
     def build_config_header(self, warning=False):
         """Generates the header depending on what is selected"""
@@ -1059,16 +1113,20 @@ class Menu:
         
     def select_integration(self, new=False):
         """Generates a menu list of integrations to select from"""
-        # Clear and refresh the screen 
         self.clear_and_refresh()
-        # Add prompt to header 
         self.current_header += '\n\nSELECT A TOOL: '
-        # Get a list of all available integrations
         if new:
-            options = self.config_mgr.integrations_list.copy()
+            enabled = set(self.config_mgr.enabled_integrations_list)
+            options = [
+                name for name in self.config_mgr.integration_mgr.scan_integration_templates()
+                if name not in enabled
+            ]
         else:
             options = self.config_mgr.enabled_integrations_list.copy()
-        # Prepend list with "BACK"
+        if not options:
+            self.current_integration = None
+            self.current_menu = self.menu_stack.pop()
+            return
         options.append("BACK")
         
         # Draw menu 
@@ -1179,7 +1237,7 @@ class Menu:
     @property
     def render_playbooks(self):
         """Renders the list of playbooks in the playbook directory"""
-        return ','.join(self.playbook_mgr.playbook_names())
+        return ','.join(self.playbook_mgr.playbook_names)
 
     @property
     def config_mgr(self):

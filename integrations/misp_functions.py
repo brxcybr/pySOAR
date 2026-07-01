@@ -1,7 +1,22 @@
 """Integration Specific Functions"""
+import os
+
 from pymisp import PyMISP
 from pymisp import MISPEvent
 from classes import Log
+
+MOCK_INDICATORS = {
+    'ip-dst': ['203.0.113.10', '203.0.113.20', '198.51.100.5'],
+    'domain': ['malicious.example.com'],
+}
+
+
+def _use_mock_mode(misp_init):
+    if os.environ.get('PYSOAR_MOCK_INTEGRATIONS', '').lower() in ('1', 'true', 'yes'):
+        return True
+    url = getattr(misp_init, 'url', '') or ''
+    api_key = getattr(misp_init, 'api_key', '') or ''
+    return '{' in url or '{' in api_key
 
 
 class MispFunction:
@@ -22,6 +37,13 @@ class MispFunction:
 
     def __init__(self, misp_init):
         self.log = Log.get_instance()
+        self._mock = _use_mock_mode(misp_init)
+        if self._mock:
+            self.log.warning("MISP integration running in mock/offline mode")
+            self.misp_api = None
+            self._feeds = self._mock_feeds()
+            self.enabled_feeds = self.get_enabled_feeds()
+            return
         self.misp_api = PyMISP(
             misp_init.url,
             misp_init.api_key,
@@ -30,6 +52,18 @@ class MispFunction:
         )
         self._feeds = self._get_feeds()
         self.enabled_feeds = self.get_enabled_feeds()
+
+    def _mock_feeds(self):
+        return [
+            {
+                'Feed': {
+                    'id': '1',
+                    'name': 'firehol_level1',
+                    'enabled': True,
+                    'event_id': '1',
+                }
+            }
+        ]
 
     def get_enabled_feeds(self):
         """Get the list of enabled feeds from MISP."""
@@ -81,6 +115,8 @@ class MispFunction:
 
     def enable_threat_feed(self, feed_id=None, data_type='ip-dst'):
         """Enable a threat feed by id/name, or auto-enable for a data type."""
+        if self._mock:
+            return True
         if feed_id is None:
             return self.ensure_feed_enabled(data_type)
         self.misp_api.enable_feed(feed_id)
@@ -170,6 +206,10 @@ class MispFunction:
 
     def get_event_data_by_type(self, data_type='ip-dst', feed_id=None):
         """Get indicator values from a cached MISP feed event."""
+        if self._mock:
+            values = MOCK_INDICATORS.get(data_type, [])
+            self.log.info(f"Mock mode returning {len(values)} {data_type} indicator(s)")
+            return values
         resolved_feed_id = self._resolve_feed_id(data_type, feed_id)
         event_id = self.get_event_id(resolved_feed_id)
         event_data = self.get_misp_event(event_id)

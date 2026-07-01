@@ -1,7 +1,8 @@
 opnsense:
   enabled: False
   url: "https://{OPNSENSE_URL}"
-  api_key: "{API_KEY}:{API_SECRET}"
+  api_key: "{API_KEY}:{API_SECRET}"  # Or api_key_secret: true with --set-secret opnsense
+  # api_key_secret: true
   ssl: True
   verifycert: False
   default_interface: "wan"

@@ -1,7 +1,8 @@
 crowdsec:
   enabled: False
   url: "http://127.0.0.1:8080"
-  api_key: "{CROWDSEC_LAPI_KEY}"
+  api_key: "{CROWDSEC_LAPI_KEY}"  # Or api_key_secret: true with --set-secret crowdsec
+  # api_key_secret: true
   ssl: False
   verifycert: False
   accepts:

@@ -19,6 +19,7 @@ from integrations.dispatch import (
 from playbook_validator import validate_playbook, format_validation_result
 from integrations.health import check_playbook_integrations, summarize_health
 from triggers import wait_for_trigger, sync_trigger_dict
+from secrets_manager import SecretStore, SecretStoreError
 # Globally disable SSL warnings (for self-signed certs)
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -294,58 +295,75 @@ class Integration:
             raise ValueError('Integration does not exist')
         # Read in the config file and store data in a dictionary
         self._params = self._read_config()
+        self._secret_store = SecretStore.get_instance()
         self._initialize_params()
-        
-        self._enabled = self._params[self._name]['enabled']
-        self._url = self._params[self._name]['url']
-        self._api_key = self._params[self._name]['api_key']
-        self._ssl = self._params[self._name]['ssl']
-        self._verifycert = self._params[self._name]['verifycert']
-        self._accepts = self._params[self._name]['accepts']
-        self._returns = self._params[self._name]['returns']
-        self._playbook_functions = self._params[self._name]['playbook_functions']
-        self._default_interface = self._params[self._name].get('default_interface', 'wan')
     
     def _initialize_params(self):
         try:
             integration_config = self._params.get(self._name, {})
             self._enabled = integration_config.get('enabled', False)
             self._url = integration_config.get('url', '')
-            self._api_key = integration_config.get('api_key', '')
+            self._api_key_secret = bool(integration_config.get('api_key_secret'))
+            self._api_key = self._secret_store.resolve_api_key(
+                self._name, integration_config
+            )
             self._ssl = integration_config.get('ssl', True)
             self._verifycert = integration_config.get('verifycert', True)
             self._accepts = integration_config.get('accepts', '')
             self._returns = integration_config.get('returns', '')
             self._playbook_functions = integration_config.get('playbook_functions', [])
             self._default_interface = integration_config.get('default_interface', 'wan')
+        except SecretStoreError as exc:
+            self.log.error(
+                f"Unable to resolve API key for {self._name}: {exc}"
+            )
+            self._api_key = ''
+            self._api_key_secret = bool(
+                self._params.get(self._name, {}).get('api_key_secret')
+            )
         except Exception as e:
             self.log.error(f"Error initializing parameters for {self._name}: {e}")
-            pass
         
     def update(self):
         """Updates an integration's parameters (self._params) in memory and sends it to Integration Manager"""
-        self._params[self._name]['enabled'] = self._enabled
-        self._params[self._name]['url'] = self._url
-        self._params[self._name]['api_key'] = self._api_key
-        self._params[self._name]['ssl'] = self._ssl
-        self._params[self._name]['verifycert'] = self._verifycert
-        self._params[self._name]['accepts'] = self._accepts
-        self._params[self._name]['returns'] = self._returns
-        self._params[self._name]['playbook_functions'] = self._playbook_functions
+        section = self._params.setdefault(self._name, {})
+        section['enabled'] = self._enabled
+        section['url'] = self._url
+        section['ssl'] = self._ssl
+        section['verifycert'] = self._verifycert
+        section['accepts'] = self._accepts
+        section['returns'] = self._returns
+        section['playbook_functions'] = self._playbook_functions
+        if self._default_interface:
+            section['default_interface'] = self._default_interface
+        if self._api_key:
+            section['api_key'] = self._api_key
+        elif self._api_key_secret:
+            section.pop('api_key', None)
+            section['api_key_secret'] = True
+        else:
+            section.pop('api_key', None)
+            section.pop('api_key_secret', None)
         self.log.info(f"Integration {self._name} parameters updated in memory.")
         
     def _pack_data(self):
         """Serialize the data into a dictionary."""
-        return {
+        data = {
             'enabled': self._enabled,
             'url': self._url,
-            'api_key': self._api_key,
             'ssl': self._ssl,
             'verifycert': self._verifycert,
             'accepts': self._accepts,
             'returns': self._returns,
-            'playbook_functions': self._playbook_functions
+            'playbook_functions': self._playbook_functions,
         }
+        if self._default_interface:
+            data['default_interface'] = self._default_interface
+        if self._api_key:
+            data['api_key'] = self._api_key
+        elif self._api_key_secret:
+            data['api_key_secret'] = True
+        return data
 
     # Private functions
     def _read_config(self):
@@ -387,6 +405,14 @@ class Integration:
     @property
     def api_key(self):
         return self._api_key
+
+    @property
+    def api_key_secret(self):
+        return self._api_key_secret
+
+    @property
+    def masked_api_key(self):
+        return self._secret_store.mask_api_key(self._api_key)
 
     @property
     def ssl(self):
@@ -432,10 +458,11 @@ class Integration:
     @api_key.setter
     def api_key(self, api_key):
         if isinstance(api_key, str):
-            if len(api_key) <= 128:  # API Key length check
+            if len(api_key) <= 512:
                 self._api_key = api_key
-            else: 
-                raise ValueError('API Key must be less than 128 characters')
+                self._api_key_secret = False
+            else:
+                raise ValueError('API Key must be less than 512 characters')
         else:
             raise TypeError('API Key must be a string')
 
@@ -602,18 +629,24 @@ class IntegrationManager:
 
     def save(self, integration_obj):
         """Saves all an integration object to disk in the correct format"""
-        # Ensure that integration object data is updated 
         integration_obj.update()
-        # Format into yaml
-        config = {
-            integration_obj.name: {
-                integration_obj._pack_data()
-            }
-        }
-        # Write the file to disk
+        secret_store = SecretStore.get_instance()
+        packed = integration_obj._pack_data()
+        if packed.get('api_key') or packed.get('api_key_secret'):
+            secret_store.init_master_key()
+        section = secret_store.prepare_config_for_save(
+            integration_obj.name,
+            packed,
+        )
+        if integration_obj._api_key:
+            integration_obj._api_key_secret = True
+            integration_obj._api_key = secret_store.resolve_api_key(
+                integration_obj.name, section
+            )
+        config = {integration_obj.name: section}
         try:
             with open(integration_obj.config_path, 'w') as f:
-                yaml.safe_dump(config, f)
+                yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
             self.log.info(f"Integration {integration_obj.name} saved.")
         except Exception as e:
             self.log.error(f"Integration {integration_obj.name} could not be saved: {e}.")

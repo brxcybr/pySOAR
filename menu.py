@@ -1175,9 +1175,15 @@ class Menu:
                     return
                 elif selected_option == 0: # Update API Key
                     self.log.info(f"Updating API Key for integration {self.current_integration.name}")
-                    self.log.debug(f"User select to update API Key: {self.current_integration.api_key}")
+                    self.log.debug(
+                        "Current API key: %s",
+                        self.current_integration.masked_api_key,
+                    )
                     self.current_integration.api_key = self.draw_input_prompt("ENTER API KEY>>>  ")
-                    self.log.debug(f"Updated API Key: {self.current_integration.api_key}")
+                    self.log.debug(
+                        "Updated API key: %s",
+                        self.current_integration.masked_api_key,
+                    )
                 elif selected_option == 1: # Update URL
                     self.log.info(f"Updating URL for integration {self.current_integration.name}")
                     self.log.debug(f"User select to update URL: {self.current_integration.url}")
@@ -1214,7 +1220,12 @@ class Menu:
         self.build_config_header(warning=warning)
         self.log.debug(f"User selected {self.current_integration.name} prior to entering the config config menu")
         self.current_header += f"\n\nENABLED: {self.current_integration.enabled}"
-        self.current_header += f"\nAPI_KEY: {self.current_integration.api_key}"
+        api_key_label = (
+            f"{self.current_integration.masked_api_key} (encrypted vault)"
+            if self.current_integration.api_key_secret
+            else self.current_integration.masked_api_key
+        )
+        self.current_header += f"\nAPI_KEY: {api_key_label}"
         self.current_header += f"\nURL: {self.current_integration.url}"
         self.current_header += f"\nSSL: {self.current_integration.ssl}"
         self.current_header += f"\nVERIFY_CERT: {self.current_integration.verifycert}"

@@ -1,7 +1,8 @@
 webhook:
   enabled: False
   url: "https://hooks.example.com/pysoar"
-  api_key: ""
+  api_key: ""  # Optional bearer token; use api_key_secret: true for encrypted storage
+  # api_key_secret: true
   ssl: True
   verifycert: True
   default_format: "generic"

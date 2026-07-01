@@ -28,7 +28,7 @@ def create_playbook(new_playbook_name='practicum', interval=2):
     pyautogui.press(['enter'], interval=interval) # Select trigger of "Continuous"
     pyautogui.press(['enter'], interval=interval) # What should happen if this action fails? "halt_playbook"
     pyautogui.press(['down', 'enter'], interval=interval)  # What should happen if this action succeeds? "execute next action"
-    pyautogui.press(['down', 'down' 'enter'], interval=interval) # Add section function "get_misp_event_by_type"
+    pyautogui.press(['down', 'down', 'enter'], interval=interval) # Add section function "get_misp_event_by_type"
     pyautogui.press(['down', 'enter'], interval=interval) # Select data_dependency "ip-dst"
     pyautogui.press(['down', 'enter'], interval=interval) # Select trigger "time interval"
     pyautogui.press(['enter'], interval=interval) # Keep default of 60 seconds

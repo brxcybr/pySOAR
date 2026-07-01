@@ -1,0 +1,20 @@
+webhook:
+  enabled: False
+  url: "https://hooks.example.com/pysoar"
+  api_key: ""  # Optional bearer token; use api_key_secret: true for encrypted storage
+  # api_key_secret: true
+  ssl: True
+  verifycert: True
+  default_format: "generic"
+  accepts:
+    - message
+    - ip-dst
+    - playbook-name
+  returns:
+    - webhook-status
+    - webhook-response
+  playbook_functions:
+    - send_webhook
+    - send_slack_message
+    - send_discord_message
+    - notify_playbook_result

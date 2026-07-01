@@ -1,9 +1,17 @@
 import unittest
 import subprocess
-import pyautogui
 import time
 from pathlib import Path
+
+try:
+    import pyautogui
+except ImportError:
+    pyautogui = None
+
+import pytest
 from classes import Playbook
+
+pytestmark = pytest.mark.skipif(pyautogui is None, reason="PyAutoGUI not installed")
 
 class TestPlaybookCreationGUI(unittest.TestCase):
 

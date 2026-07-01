@@ -29,16 +29,42 @@ purpose-built to run efficiently in edge or small-office/home-office environment
 - Automated installer for application and its dependencies
 - Support for additional operating systems and architectures
 
+## Plugin Integrations
+
+PySOAR ships template configs under `./config/*.template.yaml`. Copy a template to `./config/{name}.yaml` and enable it to use additional plugins:
+
+| Plugin | Example use |
+|---|---|
+| `webhook` | Notify Slack/Discord when a playbook finishes |
+| `crowdsec` | Ban `ip-dst` indicators via CrowdSec LAPI |
+| `opnsense` | Block indicators on OPNsense (similar to pfSense) |
+
+Example notification step after blocking:
+
+```yaml
+- function: notify_playbook_result
+  trigger:
+    type: always
+  on_success: halt_playbook
+  on_fail: halt_playbook
+```
+
 ## Known Issues
 - The menu system is not fully functional
 - Not all of the playbook functions will work together
 - The application is not fully tested
 
 ## Usage
-- Run the application by executing the following command:
+- Run the interactive menu:
 ```bash
-# Tested using Python 3.9.7 on Debian 11 (Bullseye)
-$ python pysoar.py
+# Requires Python 3.10+
+python pysoar.py
+```
+
+- Run a playbook non-interactively (recommended for demos and automation):
+```bash
+python pysoar.py --run-playbook test --once
+python pysoar.py --list-playbooks
 ```
 ![PySOAR Menu](images/main_menu.png)
 

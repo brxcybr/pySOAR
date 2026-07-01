@@ -1,7 +1,8 @@
 misp:
   enabled: True
   url: "https://{MISP_URL}" # Update with local MISP URL
-  api_key: "{APT_KEY}"      # Update with local MISP API key
+  api_key: "{APT_KEY}"      # Or set api_key_secret: true after `python pysoar.py --set-secret misp`
+  # api_key_secret: true    # Use encrypted vault instead of plaintext api_key above
   ssl: False                # Set to `true` to use SSL
   verifycert: False         # Set to `true` to verify MISP certificate (Use ONLY if both certs are issues from same trusted Root CA)
   accepts:

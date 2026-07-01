@@ -47,7 +47,7 @@ make lab-down    # tear down
 `lab/scripts/bootstrap.sh`:
 
 - Copies `lab/config/lab.yaml` into `config/` (if files do not exist)
-- Runs `--init-secrets` when no master key is present
+- Creates `secrets/.master.key` when missing (host needs `PyYAML` + `cryptography`)
 
 ## Files
 

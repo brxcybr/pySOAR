@@ -189,7 +189,7 @@ class Menu:
         if len(self.playbook_mgr.playbook_names) == 0:
             self.log.debug(f"No playbooks to display.")
             return
-        elif self.non_template_playbooks == 1:
+        elif len(self.non_template_playbooks) == 1:
             self.current_playbook = self.non_template_playbooks[0]
         else:
             self.menu_stack.append(self.current_menu)
@@ -339,7 +339,7 @@ class Menu:
             elif key == curses.KEY_DOWN and self.current_option < len(options) - 1:
                 self.current_option += 1
             elif key == curses.KEY_ENTER or key in [10, 13]:
-                if self.current_option == len(playbooks) - 1:  # "BACK" selected
+                if self.current_option == len(options) - 1:  # "RETURN TO MAIN MENU" selected
                     if len(self.menu_stack) > 1:
                         self.current_menu = self.menu_stack.pop()
                     return
@@ -874,13 +874,13 @@ class Menu:
         # Wait for the user to select a playbook...
 
         if self.current_playbook:
-            self.current_playbook = Playbook(self.current_playbook)  # Initialize PlaybookObject
+            if isinstance(self.current_playbook, str):
+                self.current_playbook = Playbook(self.current_playbook)
             if self.current_playbook.is_running:
                 self.current_header += '\n\nPLAYBOOK IS ALREADY RUNNING'
             else:
                 try:
-                    # Launch the selected playbook
-                    self.playbook_mgr.launch_playbook(self.current_playbook.name, self.config_mgr)
+                    self.playbook_mgr.launch_playbook(self.current_playbook.name, self.config_mgr, once=True)
                     self.try_to_update_playbook()
                     self.log.info(f"Launched playbook {self.current_playbook.name}")
                 except Exception as e:
@@ -905,29 +905,31 @@ class Menu:
             # User chose to go back or an error occurred
             self.current_menu = self.menu_stack[-1]
             return 
-        elif self.current_playbook.is_running:
-            # If the user selected a playbook, then stop it
-            try:
-                self.log.debug(f"User chose to stop playbook {self.current_playbook.name}")
-                self.current_playbook.stop()
-                self.current_playbook.is_running = False # Updated the is_running attribute
-                # Update the playbook data in memory and the global cache
-                self.try_to_update_playbook()
-                self.playbook_mgr.update_playbook_data(self.current_playbook.name, self.current_playbook.data)
+        elif self.current_playbook:
+            if isinstance(self.current_playbook, str):
+                self.current_playbook = Playbook(self.current_playbook)
+            if self.current_playbook.is_running:
+                try:
+                    self.log.debug(f"User chose to stop playbook {self.current_playbook.name}")
+                    self.current_playbook.stop()
+                    self.try_to_update_playbook()
+                    self.playbook_mgr.update_playbook_data(
+                        self.current_playbook.name, self.current_playbook.data
+                    )
+                    self.current_menu = self.menu_stack[-1]
+                except Exception as e:
+                    self.current_header += '\n\nERROR STOPPING PLAYBOOK'
+                    self.log.error(f"Error stopping playbook {self.current_playbook.name}: {e}")
+                    self.log.error(f"An error has occurred: {traceback.format_exc()}")
+                    self.current_menu = self.menu_stack.pop()
+                return
+            else:
+                self.log.info(
+                    f"Playbook {self.current_playbook.name} is not running. Cannot stop it."
+                )
+                self.current_header += '\n\nPLAYBOOK IS NOT RUNNING'
                 self.current_menu = self.menu_stack[-1]
-            except Exception as e:
-                self.current_header += '\n\nERROR STOPPING PLAYBOOK'
-                self.log.error(f"Error stopping playbook {self.current_playbook.name}: {e}")
-                # Log traceback data
-                self.log.error(f"An error has occurred: {traceback.format_exc()}")
-                self.current_menu = self.menu_stack.pop()
-            return
-        else:
-            # The playbook is not running
-            self.log.info(f"Playbook {self.current_playbook.name} is not running. Cannot stop it.")
-            self.current_header += '\n\nPLAYBOOK IS NOT RUNNING'
-            self.current_menu = self.menu_stack[-1]
-            return 
+                return
 
     # Playbook Removal
     def remove_playbook_menu(self):
@@ -1196,12 +1198,11 @@ class Menu:
     
     @property
     def top_header(self):
-        header  =  '                   __    ___  ____  __  _____      ______  ___  ___    __                           ' + '\n'
-        header +=  '                  / /   / _ \/  _/ / / / __/ | /| / / __ \/ _ \/ _ \   \ \                          ' + '\n'
-        header +=  '                 < <   / ___// /  / / _\ \ | |/ |/ / /_/ / , _/ // /    > >                         ' + '\n'
-        header +=  '                  \_\ /_/  /___/ / / /___/ |__/|__/\____/_/|_/____/    /_/                          ' + '\n'
-        header +=  '                     /_/        /_/                                                                 ' + '\n'
-        header +=  '                 A SOAR APPLICATION LIGHTWEIGHT ENOUGH FOR ANY ENVIRONMENT                          ' + '\n'
+        header  =  '                   ____  ______   ___    ____      ______   ___  ___    __              ' + '\n'
+        header +=  '                  / __ \\/ __/ /  /   |  / __ \\    / ____/  / _ \\/ _ \\   \\ \\             ' + '\n'
+        header +=  '                 / /_/ / /_ /  / /| | / /_/ /   / / __   / , _/ // /    > >            ' + '\n'
+        header +=  '                 \\____/\\__/___/_/ |_|/_____/   /_/ /_/  /_/|_/____/    /_/             ' + '\n'
+        header +=  '                 A SOAR APPLICATION LIGHTWEIGHT ENOUGH FOR ANY ENVIRONMENT              ' + '\n'
         return header
 
     @property

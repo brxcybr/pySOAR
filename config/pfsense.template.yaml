@@ -4,6 +4,7 @@ pfsense:
   api_key: "{API_KEY}" # update with local pfSense API key
   ssl: False         # Set to `True` to enable SSL
   verifycert: False  # Set to `True` to verify pfSense Certificate
+  default_interface: "wan"  # Interface for generated block rules
   accepts:
     - ip-dst
   returns:

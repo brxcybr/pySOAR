@@ -1,0 +1,17 @@
+crowdsec:
+  enabled: False
+  url: "http://127.0.0.1:8080"
+  api_key: "{CROWDSEC_LAPI_KEY}"
+  ssl: False
+  verifycert: False
+  accepts:
+    - ip-dst
+    - duration
+  returns:
+    - ip-dst
+    - crowdsec-decision-id
+  playbook_functions:
+    - list_decisions
+    - ban_ip
+    - unban_ip
+    - sync_blocklist

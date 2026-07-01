@@ -22,6 +22,12 @@ class PfsenseFunction:
         self.api_key = pfsense_init.api_key
         self.ssl = pfsense_init.ssl
         self.verifycert = pfsense_init.verifycert
+        self.default_interface = getattr(pfsense_init, 'default_interface', None)
+        if self.default_interface is None and hasattr(pfsense_init, 'params'):
+            cfg = pfsense_init.params.get('pfsense', {})
+            self.default_interface = cfg.get('default_interface', 'wan')
+        if not self.default_interface:
+            self.default_interface = 'wan'
 
         # Lazy initialize the API
         self._api = None
@@ -182,50 +188,51 @@ class PfsenseFunction:
         """Parse the body of a firewall rule from pfSense."""
         self.rules = [FirewallRule(rule) for rule in data]
 
-    def add_firewall_rule(self, src=["any"], src_port="any", dst="wan", dst_port="any", proto="any", direction="any", descr="", rule_action="block", interface="vmx0", gateway="", top=True):
-        """Add a new firewall rule to pfSense."""
-        # Iterate through the list of source addresses
+    def add_firewall_rule(self, src=None, src_port="any", dst="wan", dst_port="any", proto="any", direction="any", descr="PySOAR Generated Block Rule", rule_action="block", interface=None, gateway="", top=True):
+        """Add firewall block/pass rules for one or more source addresses."""
+        if src is None:
+            src = ["any"]
+        if interface is None:
+            interface = getattr(self, 'default_interface', 'wan')
         if not isinstance(src, list):
             src = [src]
+
+        added = 0
+        last_message = ""
         for src_addr in src:
-            # Check to make sure it is a valid IP address
             if not self.is_ip_valid(src_addr):
                 self.log.error(f"Invalid IP address: {src_addr}")
                 continue
-            # Check to make sure the IP address is not already blocked
             if self.get_firewall_rule_by_ip(src_addr):
                 self.log.info(f"IP address already blocked: {src_addr}")
                 continue
-            # Determine whether it is a block or a pass rule 
             if rule_action == "block":
-                # Format the rule 
-                stage_rule = FirewallRule.new_block_rule(src_addr, src_port, dst, dst_port, proto, direction, descr, interface, gateway, top)
-                self.log.debug(f"FirewallRule.new_block_rule 'stage_rule': {stage_rule}") # Debugging
+                stage_rule = FirewallRule.new_block_rule(
+                    src_addr, src_port, dst, dst_port, proto, direction, descr, interface, gateway, top
+                )
             else:
-                # Format the rule 
-                stage_rule = FirewallRule.new_pass_rule(src_addr, src_port, dst, dst_port, proto, direction, descr, interface, gateway, top)
-                self.log.debug(f"FirewallRule.new_pass_rule 'stage_rule': {stage_rule}") # Debugging
-            # Send the rule to the pfSense API
+                stage_rule = FirewallRule.new_pass_rule(
+                    src_addr, src_port, dst, dst_port, proto, direction, descr, interface, gateway, top
+                )
             status, code, return_code, message, body = self.post('api/v1/firewall/rule', data=stage_rule)
-            # Debugging
-            self.log.debug_requests_function("PfsenseFunction", "add_firewall_rule", status, code, return_code, message, self.to_pretty(body))
-            self.log.debug(f"PfsenseFunction.add_firewall_rule 'rule': {stage_rule}")
+            last_message = message
+            self.log.debug_requests_function(
+                "PfsenseFunction", "add_firewall_rule", status, code, return_code, message, self.to_pretty(body)
+            )
+            if status == "ok":
+                added += 1
 
-        # Validate that the new rule has been added
-        if len(src) > 1:
-            # Apply changes 
-            status = self.apply_changes()
-            self.log.info(f"Changes applied: {status}")
-        # Retrieve rules 
+        if added == 0:
+            if any(self.is_ip_valid(a) for a in src if a != "any"):
+                self.log.info("All requested IPs were already blocked.")
+                return True
+            self.log.warning("No new firewall rules were added.")
+            return False
+
+        applied = self.apply_changes()
+        self.log.info(f"Changes applied: {applied}; added {added} rule(s).")
         self.read_firewall_rule()
-        tracker = self.get_tracker_by_firewall_rule(rule)
-        if tracker is None:
-            # Try to get rule by its description
-            rule = self.get_firewall_rule_by_description(descr)
-            tracker = self.get_tracker_by_firewall_rule(rule)
-        if tracker is None:
-            raise Exception(f"Error adding firewall rule: {message}")
-        self.log.info(f"Firewall rule added successfully: {tracker}")
+        return {"ip-dst": src, "pfsense-firewall-status": applied, "message": last_message}
 
     def apply_changes(self):
         """Apply changes to pfSense."""
@@ -387,6 +394,10 @@ class PfsenseFunction:
     def get_firewall_logs_by_datetimerange(self, start_date, end_date, start_time=None, end_time=None):
         """Calls the FirewallLog class to get the firewall logs by datetime range."""
         return self.log_mgr.get_firewall_logs_by_datetimerange(self.firewall_logs, start_date, end_date, start_time, end_time)
+
+    def get_firewall_logs_by_daterange(self, start_date, end_date, start_time=None, end_time=None):
+        """Playbook alias for get_firewall_logs_by_datetimerange."""
+        return self.get_firewall_logs_by_datetimerange(start_date, end_date, start_time, end_time)
                 
     def update_log_cache(self, log_name, interval=''):
         # TODO: Add logic to update the log cache from the PfsenseLog class based on a time interval

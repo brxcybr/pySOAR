@@ -24,10 +24,20 @@ def _config_looks_placeholder(value):
     return '{' in str(value) and '}' in str(value)
 
 
+def _mock_mode_enabled():
+    return os.environ.get('PYSOAR_MOCK_INTEGRATIONS', '').lower() in ('1', 'true', 'yes')
+
+
 def check_integration_config(integration):
     """Validate integration config is present and not a template placeholder."""
     if not integration.enabled:
         return HealthResult(False, integration.name, 'Integration is disabled in config.')
+    if _mock_mode_enabled():
+        # Placeholder configs are valid in mock mode: integrations fall back
+        # to their in-process mocks, so don't fail the health gate on them.
+        return HealthResult(
+            True, integration.name, 'Mock integrations mode enabled; config checks skipped.'
+        )
     if _config_looks_placeholder(integration.url):
         return HealthResult(
             False,
@@ -49,7 +59,7 @@ def check_integration_connectivity(integration, timeout=5):
     if not config_result.healthy:
         return config_result
 
-    if os.environ.get('PYSOAR_MOCK_INTEGRATIONS', '').lower() in ('1', 'true', 'yes'):
+    if _mock_mode_enabled():
         return HealthResult(True, integration.name, 'Mock integrations mode enabled.')
 
     if integration.name == 'misp':

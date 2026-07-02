@@ -1,0 +1,11 @@
+title: Suspicious DNS Query
+id: sample-sigma-001
+status: experimental
+description: Sample SIGMA rule for testing
+logsource:
+  category: dns
+detection:
+  selection:
+    query|contains: evil.example.com
+  condition: selection
+level: high

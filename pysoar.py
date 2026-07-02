@@ -103,6 +103,32 @@ def parse_arguments():
         action='store_true',
         help='List registered action manifests and exit',
     )
+    parser.add_argument(
+        '--list-intel-formats',
+        action='store_true',
+        help='List supported threat intelligence formats',
+    )
+    parser.add_argument(
+        '--convert-intel',
+        metavar='FILE',
+        help='Convert a threat intelligence file through the CIDM hub',
+    )
+    parser.add_argument(
+        '--from-format',
+        metavar='FORMAT',
+        help='Source format for --convert-intel (e.g. stix2, openioc, yara)',
+    )
+    parser.add_argument(
+        '--to-format',
+        metavar='FORMAT',
+        default='cidm',
+        help='Target format for --convert-intel (default: cidm)',
+    )
+    parser.add_argument(
+        '--output',
+        metavar='FILE',
+        help='Output path for --convert-intel',
+    )
     return parser.parse_args()
 
 
@@ -193,6 +219,50 @@ def list_actions_cli():
     return 0
 
 
+def list_intel_formats_cli():
+    from core.cidm.converter import IntelConverter
+
+    for item in IntelConverter().list_formats():
+        status = 'implemented' if item['implemented'] else 'stub'
+        print(f"{item['id']}\t{item['name']}\t{status}")
+    return 0
+
+
+def convert_intel_cli(input_path, source_format, target_format, output_path=None):
+    import json
+    from pathlib import Path
+
+    from core.cidm.converter import IntelConverter
+
+    if not source_format:
+        log.error('--from-format is required with --convert-intel')
+        return 1
+    converter = IntelConverter()
+    try:
+        result = converter.convert_file(
+            input_path,
+            source_format,
+            target_format,
+            output_path=output_path,
+        )
+    except NotImplementedError as exc:
+        log.error(str(exc))
+        return 1
+    except Exception as exc:
+        log.error(f'Intel conversion failed: {exc}')
+        log.error(traceback.format_exc())
+        return 1
+
+    if output_path:
+        print(f'Wrote converted intel to {output_path}')
+    else:
+        if isinstance(result, (dict, list)):
+            print(json.dumps(result, indent=2))
+        else:
+            print(result)
+    return 0
+
+
 def serve_api_cli(host='127.0.0.1', port=8088):
     from api_server import serve
     log.info(f"Starting PySOAR API on {host}:{port}")
@@ -239,6 +309,17 @@ def main_cli():
         sys.exit(list_playbooks_cli())
     if args.list_actions:
         sys.exit(list_actions_cli())
+    if args.list_intel_formats:
+        sys.exit(list_intel_formats_cli())
+    if args.convert_intel:
+        sys.exit(
+            convert_intel_cli(
+                args.convert_intel,
+                args.from_format,
+                args.to_format,
+                args.output,
+            )
+        )
     if args.serve_api:
         sys.exit(serve_api_cli(host=args.host, port=args.port))
     if args.scheduler:

@@ -18,7 +18,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
     app = FastAPI(
         title='PySOAR API',
         description='REST interface for playbook and integration management',
-        version='0.5.0',
+        version='0.6.0',
     )
     cm = config_mgr or ConfigurationManager()
     pm = cm.playbook_mgr
@@ -59,6 +59,30 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             'service': 'pysoar-api',
             'auth_required': api_auth_enabled(),
         }
+
+    class IntelConvertRequest(BaseModel):
+        content: str
+        source_format: str
+        target_format: str = 'cidm'
+
+    @app.get('/intel/formats', dependencies=auth_dependency)
+    def list_intel_formats():
+        from core.cidm.converter import IntelConverter
+
+        return IntelConverter().list_formats()
+
+    @app.post('/intel/convert', dependencies=auth_dependency)
+    def convert_intel(body: IntelConvertRequest):
+        from core.cidm.converter import IntelConverter
+
+        converter = IntelConverter()
+        try:
+            result = converter.convert(body.content, body.source_format, body.target_format)
+        except NotImplementedError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {'source_format': body.source_format, 'target_format': body.target_format, 'result': result}
 
     @app.get('/actions', dependencies=auth_dependency)
     def list_actions():

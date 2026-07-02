@@ -1,0 +1,16 @@
+{
+  "type": "bundle",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "indicator",
+      "pattern": "[ipv4-addr:value = '203.0.113.50']",
+      "pattern_type": "stix",
+      "labels": ["malicious-activity"]
+    },
+    {
+      "type": "domain-name",
+      "value": "evil.example.com"
+    }
+  ]
+}

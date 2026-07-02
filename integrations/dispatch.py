@@ -131,6 +131,15 @@ def merge_result(shared_data, function_name, result, integration_returns=None):
         return data
 
     if isinstance(result, dict):
+        if 'cidm_bundle' in result:
+            from core.cidm.bridge import inject_cidm_into_shared_data
+            from core.cidm.model import CIDMBundle
+
+            data = inject_cidm_into_shared_data(
+                shared_data,
+                CIDMBundle.from_dict(result['cidm_bundle']),
+            )
+            return data
         for key, value in result.items():
             if integration_returns and key not in integration_returns and key not in data:
                 continue

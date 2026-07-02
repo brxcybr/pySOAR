@@ -2,6 +2,19 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.6.0] - 2026-07-01
+
+### Added — CIDM threat intelligence hub
+- `core/cidm/` Common Information Data Model for normalizing intel formats
+- Adapters: STIX 2.x, OpenIOC, YARA, SIGMA, MITRE ATT&CK, OpenC2, observables
+- Stub registrations: TAXII, MAEC, VERIS, CybOX, IDMEF, IODEF, CAPEC, intel.dat
+- `IntelConverter` hub for format-to-format translation
+- CLI: `--list-intel-formats`, `--convert-intel`, `--from-format`, `--to-format`
+- REST: `GET /intel/formats`, `POST /intel/convert`
+- Playbook shared_data `cidm_bundle` support with observable bridge
+- Optional `pysoar[intel]` extra (`stix2`)
+- Documentation: [docs/architecture/cidm.md](docs/architecture/cidm.md)
+
 ## [0.5.0] - 2026-07-01
 
 ### Added — Phase 0 foundation

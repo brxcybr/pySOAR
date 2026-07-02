@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysoar"
-version = "0.6.1"
+version = "0.7.0"
 description = "A lightweight Python SOAR framework for edge and SOHO networks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,7 +48,7 @@ webhook = "integrations.webhook_functions:WebhookFunction"
 opnsense = "integrations.opnsense_functions:OpnsenseFunction"
 
 [tool.setuptools.packages.find]
-include = ["integrations*", "core*"]
+include = ["integrations*", "core*", "sensors*"]
 
 [tool.setuptools.package-data]
 integrations = ["manifests/**/*.yaml"]

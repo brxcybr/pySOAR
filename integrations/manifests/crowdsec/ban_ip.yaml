@@ -6,6 +6,8 @@ risk: high
 producer: false
 method: ban_ip
 description: Ban IP addresses via CrowdSec LAPI.
+idempotent: true
+dedupe_window_seconds: 3600
 inputs:
   - name: ip-dst
     type: observable

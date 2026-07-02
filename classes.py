@@ -757,8 +757,15 @@ class PlaybookManager:
         return [playbook_name for playbook_name in self.playbooks_data.keys()
             if self.playbooks_data[playbook_name].get('is_running')]
         
-    def launch_playbook(self, playbook_name, config_mgr, once=False, max_cycles=None, skip_validation=False):
-        """Execute playbook logic. Set once=True to stop after one full cycle."""
+    MAX_PLAYBOOK_DEPTH = 5
+
+    def launch_playbook(self, playbook_name, config_mgr, once=False, max_cycles=None,
+                        skip_validation=False, initial_shared_data=None, return_shared_data=False):
+        """Execute playbook logic. Set once=True to stop after one full cycle.
+
+        `initial_shared_data` seeds the run (used by sensors and parent playbooks).
+        `return_shared_data=True` returns the final shared_data dict instead of True.
+        """
         if isinstance(playbook_name, Playbook):
             playbook_name = playbook_name.name
 
@@ -785,6 +792,13 @@ class PlaybookManager:
 
         if not skip_validation:
             validation = validate_playbook(playbook, config_mgr)
+            if initial_shared_data:
+                # A seeded run (child playbook or sensor launch) inherits
+                # context, so a responder-first layout is legitimate.
+                validation.errors = [
+                    issue for issue in validation.errors
+                    if issue.code != 'risky_first_step'
+                ]
             if not validation.is_valid:
                 self.log.error(format_validation_result(validation))
                 raise Exception(f"Playbook {playbook_name} failed validation.")
@@ -795,27 +809,50 @@ class PlaybookManager:
                 raise Exception(f"Playbook {playbook_name} failed integration health checks.")
 
         first = playbook.logic[0]
-        if first.data_dependencies and first.name not in ('get_misp_event_by_type',):
-            from integrations.dispatch import PRODUCER_FUNCTIONS
-            if first.name not in PRODUCER_FUNCTIONS:
-                raise Exception(
-                    f"The first function in the {playbook.name} playbook should not have input dependencies."
-                )
+        # A run seeded with shared data (child playbook or sensor launch) may
+        # legitimately start with a consumer step.
+        if not initial_shared_data:
+            if first.data_dependencies and first.name not in ('get_misp_event_by_type',):
+                from integrations.dispatch import PRODUCER_FUNCTIONS
+                if first.name not in PRODUCER_FUNCTIONS:
+                    raise Exception(
+                        f"The first function in the {playbook.name} playbook should not have input dependencies."
+                    )
+
+        call_stack = getattr(config_mgr, '_playbook_call_stack', None)
+        if call_stack is None:
+            call_stack = []
+            config_mgr._playbook_call_stack = call_stack
+        if playbook_name in call_stack:
+            raise Exception(
+                f"Recursive playbook call detected: {' -> '.join(call_stack + [playbook_name])}"
+            )
+        if len(call_stack) >= self.MAX_PLAYBOOK_DEPTH:
+            raise Exception(
+                f"Playbook nesting exceeds max depth {self.MAX_PLAYBOOK_DEPTH}: {call_stack}"
+            )
 
         iteration = 0
         cycles = 0
-        shared_data = {}
+        visited_steps = set()
+        shared_data = dict(initial_shared_data) if initial_shared_data else {}
         current_function = playbook.logic[0]
         playbook.is_running = True
         playbook.clear_stop()
+        previous_active = getattr(config_mgr, '_active_playbook', None)
         config_mgr._active_playbook = playbook
+        config_mgr._skip_validation_active = skip_validation
+        call_stack.append(playbook_name)
 
         from core.audit_log import AuditLog
         from core.observables import wrap_shared_data
+        from core.state_store import StateStore
 
         audit = AuditLog.get_instance()
+        store = StateStore.get_instance()
         run_status = 'completed'
         audit.start_run(playbook.name, {'once': once, 'max_cycles': max_cycles})
+        run_id = store.start_run(playbook.name)
 
         try:
             while current_function.name != "halt_playbook":
@@ -825,6 +862,7 @@ class PlaybookManager:
                     break
 
                 audit.step_start(current_function.name, shared_data)
+                visited_steps.add(current_function.name)
                 self.log.debug(
                     f"Executing {current_function.name} in {playbook.name} with data {shared_data}"
                 )
@@ -834,6 +872,7 @@ class PlaybookManager:
                     )
                 except Exception as step_exc:
                     audit.step_error(current_function.name, str(step_exc))
+                    store.record_step(run_id, current_function.name, success=False)
                     raise
                 wrap_shared_data(shared_data).sync_from_legacy(
                     source=current_function.name
@@ -844,6 +883,10 @@ class PlaybookManager:
                     next_step=next_function_name,
                     shared_data=shared_data,
                 )
+                store.record_step(
+                    run_id, current_function.name, success=True, next_step=next_function_name
+                )
+                store.record_shared_data_observables(shared_data, source=playbook.name)
                 iteration += 1
 
                 if next_function_name == "halt_playbook":
@@ -858,13 +901,17 @@ class PlaybookManager:
                         f"Next function '{next_function_name}' does not exist in playbook {playbook.name}."
                     )
 
-                if current_function.name == playbook.logic[0].name:
+                # Revisiting any already-executed step means the graph looped;
+                # count it as a completed cycle (loops don't have to return to
+                # the first step).
+                if current_function.name in visited_steps:
                     cycles += 1
                     if once or (max_cycles is not None and cycles >= max_cycles):
                         self.log.info(
                             f"Playbook {playbook.name} completed cycle {cycles}; stopping."
                         )
                         break
+                    visited_steps.clear()
         except Exception as e:
             playbook.is_running = False
             run_status = 'failed'
@@ -873,14 +920,19 @@ class PlaybookManager:
             raise
         finally:
             playbook.is_running = False
-            config_mgr._active_playbook = None
+            config_mgr._active_playbook = previous_active
+            if playbook_name in call_stack:
+                call_stack.remove(playbook_name)
             audit.end_run(playbook.name, run_status, steps=iteration, cycles=cycles)
+            store.end_run(
+                run_id, run_status, steps=iteration, cycles=cycles, shared_data=shared_data
+            )
 
         self.log.info(
             f"Playbook {playbook.name} finished after {iteration} step(s), {cycles} cycle(s)."
         )
         self.log.debug(f"Playbook {playbook.name} final shared data: {shared_data}")
-        return True
+        return shared_data if return_shared_data else True
     
     def update_playbook_data(self, playbook_name, updates):
         """Update in-memory playbook data."""
@@ -1254,6 +1306,9 @@ class PlaybookFunction:
             self.log.info(f"Function {self.name} skipped; trigger condition not met.")
             return shared_data, self.on_fail
 
+        if self.name.startswith('run_playbook:'):
+            return self._execute_child_playbook(shared_data, config_mgr)
+
         from integrations.dispatch import producer_functions, build_kwargs, merge_result, is_success, find_integration_for_function
 
         if self.data_dependencies and self.name not in producer_functions():
@@ -1266,6 +1321,11 @@ class PlaybookFunction:
         try:
             _, method = config_mgr.resolve_callable(self.name)
             kwargs = build_kwargs(self.name, method, shared_data, self.data_dependencies)
+
+            skipped, fingerprint, manifest = self._check_idempotency(kwargs)
+            if skipped:
+                return shared_data, self.on_success
+
             result = method(**kwargs)
 
             integration = find_integration_for_function(config_mgr, self.name)
@@ -1274,6 +1334,15 @@ class PlaybookFunction:
             )
 
             success = is_success(result)
+            if success and fingerprint is not None:
+                from core.state_store import StateStore
+                StateStore.get_instance().record_action(
+                    fingerprint,
+                    self.name,
+                    integration=manifest.integration if manifest else '',
+                    kwargs=kwargs,
+                    result=result if isinstance(result, (str, int, float, bool)) else None,
+                )
             next_function = self.on_success if success else self.on_fail
             self.log.info(f"Function {self.name} executed. Success: {success}")
             return shared_data, next_function
@@ -1282,6 +1351,73 @@ class PlaybookFunction:
             self.log.error(f"Error in function {self.name}: {e}")
             self.log.error(traceback.format_exc())
             return shared_data, self.on_fail
+
+    def _check_idempotency(self, kwargs):
+        """Return (skip, fingerprint, manifest) for the pending action.
+
+        Actions whose manifest declares `idempotent: true` are skipped when an
+        identical invocation succeeded within the dedupe window. All
+        manifest-backed actions get a fingerprint so successes are recorded.
+        """
+        from core.manifests import ManifestRegistry
+        from core.state_store import StateStore, action_fingerprint
+
+        manifest = ManifestRegistry.get_instance().get(self.name)
+        if manifest is None:
+            return False, None, None
+        fingerprint = action_fingerprint(manifest.integration, self.name, kwargs)
+        if not manifest.idempotent:
+            return False, fingerprint, manifest
+        store = StateStore.get_instance()
+        previous = store.recent_action(fingerprint, manifest.dedupe_window_seconds)
+        if previous is not None:
+            self.log.info(
+                f"Skipping {self.name}: identical action succeeded within "
+                f"{manifest.dedupe_window_seconds}s dedupe window (idempotent)."
+            )
+            return True, fingerprint, manifest
+        return False, fingerprint, manifest
+
+    def _execute_child_playbook(self, shared_data, config_mgr):
+        """Run a child playbook (`run_playbook:<name>` step) and merge results."""
+        import copy
+
+        child_name = self.name.split(':', 1)[1].strip()
+        if not child_name:
+            self.log.error('run_playbook step missing child playbook name.')
+            return shared_data, self.on_fail
+
+        playbook_mgr = getattr(config_mgr, 'playbook_mgr', None)
+        if playbook_mgr is None:
+            self.log.error('run_playbook requires a playbook manager on config_mgr.')
+            return shared_data, self.on_fail
+
+        try:
+            child_shared = playbook_mgr.launch_playbook(
+                child_name,
+                config_mgr,
+                once=True,
+                # The parent's validation decision covers the whole run tree.
+                skip_validation=getattr(config_mgr, '_skip_validation_active', False),
+                initial_shared_data=copy.deepcopy(shared_data),
+                return_shared_data=True,
+            )
+        except Exception as exc:
+            self.log.error(f"Child playbook '{child_name}' failed: {exc}")
+            return shared_data, self.on_fail
+
+        if isinstance(child_shared, dict):
+            shared_data.update(child_shared)
+            from core.observables import wrap_shared_data
+            wrap_shared_data(shared_data).sync_from_legacy(
+                source=f'run_playbook:{child_name}'
+            )
+            self.log.info(f"Child playbook '{child_name}' completed.")
+            return shared_data, self.on_success
+
+        # launch_playbook returned False: guard rejected the run.
+        self.log.error(f"Child playbook '{child_name}' did not run.")
+        return shared_data, self.on_fail
     
     def update_trigger(self, trigger):
         self.trigger = trigger

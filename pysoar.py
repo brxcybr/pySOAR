@@ -129,6 +129,19 @@ def parse_arguments():
         metavar='FILE',
         help='Output path for --convert-intel',
     )
+    parser.add_argument(
+        '--history',
+        nargs='?',
+        type=int,
+        const=20,
+        metavar='N',
+        help='Show the last N playbook runs from the state store (default 20)',
+    )
+    parser.add_argument(
+        '--list-sensors',
+        action='store_true',
+        help='List registered environmental sensors',
+    )
     return parser.parse_args()
 
 
@@ -228,6 +241,36 @@ def list_intel_formats_cli():
     return 0
 
 
+def history_cli(limit):
+    from datetime import datetime
+
+    from core.state_store import StateStore
+
+    store = StateStore.get_instance()
+    if not store.enabled:
+        print('State store disabled (PYSOAR_STATE_DB=off).')
+        return 1
+    runs = store.list_runs(limit=limit)
+    if not runs:
+        print('No playbook runs recorded yet.')
+        return 0
+    for run in runs:
+        started = datetime.fromtimestamp(run['started']).strftime('%Y-%m-%d %H:%M:%S')
+        print(
+            f"{started}\t{run['playbook']}\t{run['status']}\t"
+            f"steps={run['steps']}\tcycles={run['cycles']}\t{run['id'][:8]}"
+        )
+    return 0
+
+
+def list_sensors_cli():
+    from sensors.registry import SensorRegistry
+
+    for item in SensorRegistry.get_instance().list_sensors():
+        print(f"{item['id']}\t{item['name']}")
+    return 0
+
+
 def convert_intel_cli(input_path, source_format, target_format, output_path=None):
     import json
     from pathlib import Path
@@ -311,6 +354,10 @@ def main_cli():
         sys.exit(list_actions_cli())
     if args.list_intel_formats:
         sys.exit(list_intel_formats_cli())
+    if args.history is not None:
+        sys.exit(history_cli(args.history))
+    if args.list_sensors:
+        sys.exit(list_sensors_cli())
     if args.convert_intel:
         sys.exit(
             convert_intel_cli(

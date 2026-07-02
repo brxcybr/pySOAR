@@ -18,7 +18,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
     app = FastAPI(
         title='PySOAR API',
         description='REST interface for playbook and integration management',
-        version='0.6.1',
+        version='0.7.0',
     )
     cm = config_mgr or ConfigurationManager()
     pm = cm.playbook_mgr
@@ -83,6 +83,33 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {'source_format': body.source_format, 'target_format': body.target_format, 'result': result}
+
+    @app.get('/runs', dependencies=auth_dependency)
+    def list_runs(limit: int = 20, playbook: Optional[str] = None):
+        from core.state_store import StateStore
+
+        return StateStore.get_instance().list_runs(limit=limit, playbook=playbook)
+
+    @app.get('/runs/{run_id}', dependencies=auth_dependency)
+    def get_run(run_id: str):
+        from core.state_store import StateStore
+
+        run = StateStore.get_instance().get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail='Run not found')
+        return run
+
+    @app.get('/observables', dependencies=auth_dependency)
+    def list_observables(type: Optional[str] = None, limit: int = 100):
+        from core.state_store import StateStore
+
+        return StateStore.get_instance().list_observables(obs_type=type, limit=limit)
+
+    @app.get('/sensors', dependencies=auth_dependency)
+    def list_sensors():
+        from sensors.registry import SensorRegistry
+
+        return SensorRegistry.get_instance().list_sensors()
 
     @app.get('/actions', dependencies=auth_dependency)
     def list_actions():

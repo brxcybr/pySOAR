@@ -2,6 +2,24 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.7.0] - 2026-07-02
+
+### Added — persistence, sensors, orchestration
+- `core/state_store.py` SQLite persistence: run history, step records, deduplicated observable memory, action idempotency ledger, key/value state (`PYSOAR_STATE_DB`, WAL mode, stdlib only)
+- Idempotent actions: manifests may declare `idempotent: true` + `dedupe_window_seconds`; identical successful invocations within the window are skipped (enabled for `add_firewall_rule`, `ban_ip`)
+- `sensors/` plugin type with `beacon_detector` reference sensor (inter-arrival statistics for C2 heartbeat detection; JSONL log via `PYSOAR_CONN_LOG` or programmatic feed)
+- `sensor` condition type for triggers: `when: "beacon_score >= 0.8 and duration_hours >= 2"` (safe expression parser, no eval); firing sensors inject their observables into shared_data
+- `PlaybookScheduler.schedule_condition()` — 24/7 watch pattern: poll a sensor and launch a playbook (seeded with sensor observables) when the condition is met
+- Playbook composition: `run_playbook:<child>` steps run child playbooks with shared_data passing and merge-back; recursion/depth guards; validator checks for self-reference and missing children
+- Scheduler guardrails: global concurrency cap (`max_concurrent`) and per-playbook already-running skip
+- CLI: `--history [N]`, `--list-sensors`; API: `GET /runs`, `GET /runs/{id}`, `GET /observables`, `GET /sensors`
+- Documentation: [docs/architecture/persistence-and-orchestration.md](docs/architecture/persistence-and-orchestration.md)
+
+### Fixed
+- `--once` / `max_cycles` never terminated for playbooks that loop back to a mid-graph step instead of the first step; cycle detection now tracks visited steps
+- `evaluate_condition` no longer discards the caller's empty shared_data dict (sensor observable injection was lost on first steps)
+- Responder manifests no longer map bare scalar results onto observable keys (a `True` return could stomp `ip-dst` in shared_data)
+
 ## [0.6.1] - 2026-07-02
 
 ### Fixed — CIDM adapter hardening

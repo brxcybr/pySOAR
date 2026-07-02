@@ -9,6 +9,7 @@
 | [Architecture overview](architecture/overview.md) | System design |
 | [Phase 0 foundation](architecture/phase0-foundation.md) | Plugin registry, manifests, observables |
 | [CIDM intel formats](architecture/cidm.md) | STIX, OpenIOC, YARA, SIGMA, MITRE, OpenC2 hub |
+| [Persistence & orchestration](architecture/persistence-and-orchestration.md) | State store, sensors, condition triggers, playbook composition |
 | [Docker lab](lab/docker-compose.md) | One-command test environment |
 | [GNS3 topology](lab/gns3-topology.md) | Full network lab guide |
 | [REST API](api/rest-api.md) | FastAPI endpoints |

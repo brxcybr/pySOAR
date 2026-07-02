@@ -26,6 +26,8 @@ class ActionManifest:
     inputs: list[dict] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
     description: str = ''
+    idempotent: bool = False
+    dedupe_window_seconds: int = 3600
 
     @classmethod
     def from_dict(cls, data: dict, path: Path) -> 'ActionManifest':
@@ -41,6 +43,8 @@ class ActionManifest:
             inputs=list(data.get('inputs') or []),
             outputs=list(data.get('outputs') or []),
             description=data.get('description', ''),
+            idempotent=bool(data.get('idempotent', False)),
+            dedupe_window_seconds=int(data.get('dedupe_window_seconds', 3600)),
         )
 
     @property
@@ -116,8 +120,12 @@ class ManifestRegistry:
         return {name for name, m in self._by_name.items() if m.producer}
 
     def function_output_keys(self) -> dict[str, str]:
+        # Only producers write their scalar result into shared_data; mapping a
+        # responder here would let a bare `True` return stomp e.g. 'ip-dst'.
         result = {}
         for name, manifest in self._by_name.items():
+            if not manifest.producer:
+                continue
             primary = manifest.primary_output
             if primary:
                 result[name] = primary

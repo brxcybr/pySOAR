@@ -20,7 +20,9 @@ def sync_trigger_dict(playbook_function):
 
 def evaluate_condition(condition, shared_data=None, config_mgr=None, playbook=None):
     """Evaluate a declarative condition against runtime context."""
-    shared_data = shared_data or {}
+    # Preserve the caller's dict identity: sensor conditions inject
+    # observables into it, which must be visible to the caller.
+    shared_data = shared_data if isinstance(shared_data, dict) else {}
     condition = condition or {}
     condition_type = condition.get('type', 'shared_data_present')
 
@@ -54,6 +56,30 @@ def evaluate_condition(condition, shared_data=None, config_mgr=None, playbook=No
         expected = condition.get('equals')
         actual = os.environ.get(var_name)
         return actual == expected
+
+    if condition_type == 'sensor':
+        from sensors.conditions import evaluate_metric_expression
+        from sensors.registry import SensorRegistry
+
+        sensor = SensorRegistry.get_instance().get(condition.get('sensor', ''))
+        if sensor is None:
+            return False
+        reading = sensor.poll()
+        expression = condition.get('when', '')
+        satisfied = evaluate_metric_expression(expression, reading.metrics)
+        if satisfied and isinstance(shared_data, dict):
+            # Surface the observables that tripped the sensor to the playbook.
+            from core.observables import wrap_shared_data
+
+            ctx = wrap_shared_data(shared_data)
+            for item in reading.observables:
+                ctx.add_observable(
+                    item.get('type', 'generic'),
+                    str(item.get('value', '')),
+                    source=f"sensor:{sensor.sensor_id}",
+                )
+            shared_data.setdefault('sensor_metrics', {})[sensor.sensor_id] = reading.metrics
+        return satisfied
 
     if condition_type == 'all':
         return all(

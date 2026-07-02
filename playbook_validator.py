@@ -68,6 +68,30 @@ def _resolve_branch_target(target, logic_names):
     return False, target
 
 
+def _validate_step_trigger(step, idx, result):
+    trigger_type = getattr(step, 'trigger_type', '') or step.trigger.get('type', '')
+    if trigger_type != 'condition':
+        return
+    condition = step.trigger.get('condition') or {}
+    if not condition:
+        result.add_error(
+            'empty_condition',
+            f'Step {idx + 1} "{step.name}" uses CONDITION trigger but defines no condition.',
+        )
+        return
+    if condition.get('type') == 'sensor':
+        if not condition.get('sensor'):
+            result.add_error(
+                'sensor_missing_id',
+                f'Step {idx + 1} "{step.name}" sensor condition needs a "sensor" id.',
+            )
+        if not condition.get('when'):
+            result.add_error(
+                'sensor_missing_when',
+                f'Step {idx + 1} "{step.name}" sensor condition needs a "when" expression.',
+            )
+
+
 def validate_playbook(playbook, config_mgr=None):
     """Validate playbook graph, integrations, data flow, and safety rules."""
     result = ValidationResult()
@@ -105,6 +129,30 @@ def validate_playbook(playbook, config_mgr=None):
 
     for idx, step in enumerate(logic):
         if step.name == 'halt_playbook':
+            continue
+
+        if step.name.startswith('run_playbook:'):
+            child_name = step.name.split(':', 1)[1].strip()
+            if not child_name:
+                result.add_error(
+                    'missing_child_playbook',
+                    f'Step {idx + 1} run_playbook has no child playbook name.',
+                )
+            elif child_name == playbook.name:
+                result.add_error(
+                    'recursive_playbook',
+                    f'Step {idx + 1} run_playbook references the playbook itself.',
+                )
+            elif config_mgr is not None and hasattr(config_mgr, 'playbook_mgr'):
+                pm = config_mgr.playbook_mgr
+                pm._load_all_playbooks_if_required()
+                if child_name not in pm.playbooks_data:
+                    result.add_error(
+                        'unknown_child_playbook',
+                        f'Step {idx + 1} run_playbook references missing playbook "{child_name}".',
+                    )
+            # Composition steps are built-ins, not integration functions.
+            _validate_step_trigger(step, idx, result)
             continue
 
         if config_mgr and enabled_functions and step.name not in enabled_functions:
@@ -159,14 +207,7 @@ def validate_playbook(playbook, config_mgr=None):
         for shared_key in function_input_mapping().get(step.name, {}):
             available_data.add(shared_key)
 
-        trigger_type = getattr(step, 'trigger_type', '') or step.trigger.get('type', '')
-        if trigger_type == 'condition':
-            condition = step.trigger.get('condition') or {}
-            if not condition:
-                result.add_error(
-                    'empty_condition',
-                    f'Step {idx + 1} "{step.name}" uses CONDITION trigger but defines no condition.',
-                )
+        _validate_step_trigger(step, idx, result)
 
     if config_mgr and playbook.integration_deps:
         missing_integrations = [

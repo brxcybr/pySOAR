@@ -321,6 +321,11 @@ class Integration:
             self._returns = integration_config.get('returns', '')
             self._playbook_functions = integration_config.get('playbook_functions', [])
             self._default_interface = integration_config.get('default_interface', 'wan')
+            # Vendor-agnostic health probing: any integration can declare its
+            # own probe path and auth header style instead of relying on
+            # name-based defaults in integrations/health.py.
+            self.health_path = integration_config.get('health_path', '')
+            self.auth_header = integration_config.get('auth_header', '')
         except SecretStoreError as exc:
             self.log.error(
                 f"Unable to resolve API key for {self._name}: {exc}"
@@ -1309,6 +1314,9 @@ class PlaybookFunction:
         if self.name.startswith('run_playbook:'):
             return self._execute_child_playbook(shared_data, config_mgr)
 
+        if self.name.startswith('analyze:') or self.name == 'analyze':
+            return self._execute_analyzers(shared_data)
+
         from integrations.dispatch import producer_functions, build_kwargs, merge_result, is_success, find_integration_for_function
 
         if self.data_dependencies and self.name not in producer_functions():
@@ -1326,7 +1334,7 @@ class PlaybookFunction:
             if skipped:
                 return shared_data, self.on_success
 
-            result = method(**kwargs)
+            result = self._call_with_retries(method, kwargs, manifest)
 
             integration = find_integration_for_function(config_mgr, self.name)
             shared_data = merge_result(
@@ -1351,6 +1359,52 @@ class PlaybookFunction:
             self.log.error(f"Error in function {self.name}: {e}")
             self.log.error(traceback.format_exc())
             return shared_data, self.on_fail
+
+    def _call_with_retries(self, method, kwargs, manifest):
+        """Invoke the integration method with manifest-driven retry/backoff.
+
+        Edge links are lossy; a single failed HTTP call should not route a
+        playbook to on_fail when the manifest declares the action retryable.
+        """
+        retries = getattr(manifest, 'retries', 0) if manifest else 0
+        backoff = getattr(manifest, 'retry_backoff_seconds', 2.0) if manifest else 2.0
+        attempt = 0
+        while True:
+            try:
+                return method(**kwargs)
+            except Exception as exc:
+                attempt += 1
+                if attempt > retries:
+                    raise
+                delay = backoff * (2 ** (attempt - 1))
+                self.log.warning(
+                    f"{self.name} attempt {attempt}/{retries} failed ({exc}); "
+                    f"retrying in {delay:.1f}s"
+                )
+                time.sleep(delay)
+
+    def _execute_analyzers(self, shared_data):
+        """Built-in `analyze` / `analyze:<id,id>` step: enrich observables."""
+        from analyzers.runner import run_analyzers
+
+        analyzer_ids = None
+        if ':' in self.name:
+            spec = self.name.split(':', 1)[1].strip()
+            if spec and spec != 'all':
+                analyzer_ids = [item.strip() for item in spec.split(',') if item.strip()]
+        try:
+            reports = run_analyzers(shared_data, analyzer_ids=analyzer_ids)
+        except Exception as exc:
+            self.log.error(f'Analyzer step failed: {exc}')
+            return shared_data, self.on_fail
+        errors = [r for r in reports if r.error]
+        for report in errors:
+            self.log.warning(f'Analyzer {report.analyzer} error: {report.error}')
+        self.log.info(
+            f'Analyzer step completed: {len(reports) - len(errors)} report(s), '
+            f"verdict={shared_data.get('analysis_verdict', 'unknown')}"
+        )
+        return shared_data, self.on_success
 
     def _check_idempotency(self, kwargs):
         """Return (skip, fingerprint, manifest) for the pending action.

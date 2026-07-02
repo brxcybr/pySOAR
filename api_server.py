@@ -18,7 +18,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
     app = FastAPI(
         title='PySOAR API',
         description='REST interface for playbook and integration management',
-        version='0.7.0',
+        version='0.8.0',
     )
     cm = config_mgr or ConfigurationManager()
     pm = cm.playbook_mgr
@@ -83,6 +83,78 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {'source_format': body.source_format, 'target_format': body.target_format, 'result': result}
+
+    @app.post('/ingest', dependencies=auth_dependency)
+    def ingest_alert(payload: dict):
+        from core.ingest import normalize_alert
+
+        try:
+            shared = normalize_alert(payload, source='api')
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {'observables': shared.get('observables', []), 'shared_data': shared}
+
+    @app.post('/ingest/{name}', dependencies=auth_dependency)
+    def ingest_and_launch(name: str, payload: dict, background: bool = True):
+        import threading
+
+        from core.ingest import normalize_alert
+
+        pm._load_all_playbooks_if_required()
+        if name not in pm.playbook_names:
+            raise HTTPException(status_code=404, detail='Playbook not found')
+        try:
+            shared = normalize_alert(payload, source='api')
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        def _launch():
+            try:
+                pm.launch_playbook(name, cm, once=True, initial_shared_data=shared)
+            except Exception as exc:
+                log.error(f'Ingest-launched playbook {name} failed: {exc}')
+
+        if background:
+            threading.Thread(target=_launch, daemon=True).start()
+            return {
+                'status': 'accepted',
+                'playbook': name,
+                'observables': len(shared.get('observables', [])),
+            }
+        _launch()
+        return {
+            'status': 'completed',
+            'playbook': name,
+            'observables': len(shared.get('observables', [])),
+        }
+
+    @app.get('/analyzers', dependencies=auth_dependency)
+    def list_analyzers():
+        from analyzers.registry import AnalyzerRegistry
+
+        return AnalyzerRegistry.get_instance().list_analyzers()
+
+    class AnalyzeRequest(BaseModel):
+        type: str
+        value: str
+        analyzers: Optional[list] = None
+
+    @app.post('/analyze', dependencies=auth_dependency)
+    def analyze_observable(body: AnalyzeRequest):
+        from analyzers.registry import AnalyzerRegistry
+
+        registry = AnalyzerRegistry.get_instance()
+        targets = (
+            [registry.get(aid) for aid in body.analyzers]
+            if body.analyzers
+            else registry.for_type(body.type)
+        )
+        reports = [
+            analyzer.analyze(body.type, body.value).to_dict()
+            for analyzer in targets
+            if analyzer is not None and analyzer.available and analyzer.supports(body.type)
+        ]
+        return {'reports': reports}
 
     @app.get('/runs', dependencies=auth_dependency)
     def list_runs(limit: int = 20, playbook: Optional[str] = None):

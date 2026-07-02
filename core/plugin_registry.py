@@ -19,6 +19,7 @@ BUILTIN_INTEGRATIONS = {
     'crowdsec': ('integrations.crowdsec_functions', 'CrowdsecFunction'),
     'webhook': ('integrations.webhook_functions', 'WebhookFunction'),
     'opnsense': ('integrations.opnsense_functions', 'OpnsenseFunction'),
+    'smtp': ('integrations.smtp_functions', 'SmtpFunction'),
 }
 
 

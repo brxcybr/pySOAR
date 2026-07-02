@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pysoar",
-    version="0.7.0",
+    version="0.8.0",
     description="A lightweight Python SOAR framework for edge and SOHO networks",
     packages=find_packages(),
     package_data={

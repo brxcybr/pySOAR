@@ -2,6 +2,21 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.8.0] - 2026-07-02
+
+### Added — analyzers, ingestion, notifications, retries (vendor-agnostic)
+- `analyzers/` enrichment framework: `AnalyzerBase` contract with state-store response caching, per-analyzer rate limiting, mock mode (`PYSOAR_MOCK_ANALYZERS`), and entry-point discovery (`pysoar.analyzers`); API keys via `PYSOAR_ANALYZER_<ID>_API_KEY`
+- Reference analyzer plugins: VirusTotal, AbuseIPDB, AlienVault OTX, Shodan — normalized verdict (`benign|suspicious|malicious|unknown`) and 0–100 score
+- Built-in `analyze` / `analyze:<id,id>` playbook step enriching all shared_data observables; rollup keys `analysis_max_score` / `analysis_verdict`
+- `expression` trigger condition for numeric shared_data thresholds (e.g. `when: "analysis_max_score >= 75"`)
+- Alert ingestion: `POST /ingest` (normalize) and `POST /ingest/{playbook}` (normalize + launch, background by default); accepts CIDM bundles, STIX bundles, observable lists, or flat keys (`core/ingest.py`)
+- SMTP notifier integration (stdlib smtplib, mock mode, `config/smtp.template.yaml`, `send_email` manifest)
+- Manifest-driven retry/backoff: `retries` + `retry_backoff_seconds` with exponential backoff on integration call failures
+- Vendor-agnostic health checks: integrations declare `health_path` and `auth_header` in config instead of relying on name-based defaults in core
+- `ManifestRegistry.register()` for programmatic manifest registration (plugins, tests)
+- CLI: `--list-analyzers`, `--analyze TYPE VALUE`; API: `GET /analyzers`, `POST /analyze`
+- Documentation: [docs/architecture/extensibility.md](docs/architecture/extensibility.md) — how to add integrations/analyzers for any vendor
+
 ## [0.7.0] - 2026-07-02
 
 ### Added — persistence, sensors, orchestration

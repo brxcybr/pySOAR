@@ -155,6 +155,11 @@ def validate_playbook(playbook, config_mgr=None):
             _validate_step_trigger(step, idx, result)
             continue
 
+        if step.name == 'analyze' or step.name.startswith('analyze:'):
+            # Built-in enrichment step; analyzer availability is runtime-checked.
+            _validate_step_trigger(step, idx, result)
+            continue
+
         if config_mgr and enabled_functions and step.name not in enabled_functions:
             result.add_error(
                 'unknown_function',

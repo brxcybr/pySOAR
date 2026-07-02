@@ -62,24 +62,46 @@ def check_integration_connectivity(integration, timeout=5):
     if _mock_mode_enabled():
         return HealthResult(True, integration.name, 'Mock integrations mode enabled.')
 
-    if integration.name == 'misp':
-        return _probe_http(integration, path='/servers/getVersion', integration_name='misp')
-    if integration.name in ('pfsense', 'opnsense'):
-        return _probe_http(integration, path='/api/v1/status/system', integration_name=integration.name)
-    if integration.name == 'crowdsec':
-        return _probe_http(integration, path='/v1/decisions', integration_name='crowdsec')
+    # Config-declared probe path wins: any integration (from any vendor) can
+    # set `health_path` without PySOAR core knowing its name.
+    declared_path = getattr(integration, 'health_path', '') or ''
+    if declared_path:
+        return _probe_http(integration, path=declared_path, integration_name=integration.name)
+
+    default_path = _DEFAULT_PROBE_PATHS.get(integration.name)
+    if default_path:
+        return _probe_http(integration, path=default_path, integration_name=integration.name)
     if integration.name == 'webhook':
         return HealthResult(True, integration.name, 'Webhook URL configured; delivery verified at runtime only.')
 
     return HealthResult(True, integration.name, 'No dedicated probe; config validated only.')
 
 
+# Convenience defaults for bundled reference integrations. Not required:
+# integrations should declare `health_path` in their own config.
+_DEFAULT_PROBE_PATHS = {
+    'misp': '/servers/getVersion',
+    'pfsense': '/api/v1/status/system',
+    'opnsense': '/api/v1/status/system',
+    'crowdsec': '/v1/decisions',
+}
+
+_DEFAULT_AUTH_HEADERS = {
+    'crowdsec': 'x-api-key',
+    'opnsense': 'none',
+}
+
+
 def _probe_http(integration, path, integration_name):
     url = integration.url.rstrip('/') + path
     headers = {}
-    if integration.api_key and integration_name != 'opnsense':
+    auth_style = (
+        getattr(integration, 'auth_header', '') or
+        _DEFAULT_AUTH_HEADERS.get(integration_name, 'authorization')
+    ).lower()
+    if integration.api_key and auth_style == 'authorization':
         headers['Authorization'] = integration.api_key
-    if integration_name == 'crowdsec':
+    elif integration.api_key and auth_style == 'x-api-key':
         headers['X-Api-Key'] = integration.api_key
     verify = integration.verifycert if integration.ssl else False
     try:

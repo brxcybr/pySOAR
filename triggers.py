@@ -57,6 +57,18 @@ def evaluate_condition(condition, shared_data=None, config_mgr=None, playbook=No
         actual = os.environ.get(var_name)
         return actual == expected
 
+    if condition_type == 'expression':
+        # Numeric threshold over shared_data values, e.g. after an analyze
+        # step: {type: expression, when: "analysis_max_score >= 75"}
+        from sensors.conditions import evaluate_metric_expression
+
+        metrics = {
+            key: value
+            for key, value in shared_data.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
+        return evaluate_metric_expression(condition.get('when', ''), metrics)
+
     if condition_type == 'sensor':
         from sensors.conditions import evaluate_metric_expression
         from sensors.registry import SensorRegistry

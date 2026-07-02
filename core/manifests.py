@@ -28,6 +28,8 @@ class ActionManifest:
     description: str = ''
     idempotent: bool = False
     dedupe_window_seconds: int = 3600
+    retries: int = 0
+    retry_backoff_seconds: float = 2.0
 
     @classmethod
     def from_dict(cls, data: dict, path: Path) -> 'ActionManifest':
@@ -45,6 +47,8 @@ class ActionManifest:
             description=data.get('description', ''),
             idempotent=bool(data.get('idempotent', False)),
             dedupe_window_seconds=int(data.get('dedupe_window_seconds', 3600)),
+            retries=int(data.get('retries', 0)),
+            retry_backoff_seconds=float(data.get('retry_backoff_seconds', 2.0)),
         )
 
     @property
@@ -106,6 +110,10 @@ class ManifestRegistry:
                 self._by_name[manifest.name] = manifest
             except (OSError, yaml.YAMLError):
                 continue
+
+    def register(self, manifest: ActionManifest):
+        """Register a manifest programmatically (plugins, tests)."""
+        self._by_name[manifest.name] = manifest
 
     def get(self, name: str) -> Optional[ActionManifest]:
         return self._by_name.get(name)

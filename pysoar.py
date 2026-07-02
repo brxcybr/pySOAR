@@ -142,6 +142,17 @@ def parse_arguments():
         action='store_true',
         help='List registered environmental sensors',
     )
+    parser.add_argument(
+        '--list-analyzers',
+        action='store_true',
+        help='List registered enrichment analyzers',
+    )
+    parser.add_argument(
+        '--analyze',
+        nargs=2,
+        metavar=('TYPE', 'VALUE'),
+        help='Run analyzers against one observable (e.g. --analyze ip-dst 203.0.113.9)',
+    )
     return parser.parse_args()
 
 
@@ -271,6 +282,36 @@ def list_sensors_cli():
     return 0
 
 
+def list_analyzers_cli():
+    from analyzers.registry import AnalyzerRegistry
+
+    for item in AnalyzerRegistry.get_instance().list_analyzers():
+        status = 'available' if item['available'] else 'needs API key'
+        print(f"{item['id']}\t{item['name']}\t{','.join(item['types'])}\t{status}")
+    return 0
+
+
+def analyze_cli(obs_type, value):
+    import json
+
+    from analyzers.registry import AnalyzerRegistry
+
+    registry = AnalyzerRegistry.get_instance()
+    reports = [
+        analyzer.analyze(obs_type, value).to_dict()
+        for analyzer in registry.for_type(obs_type)
+        if analyzer.available
+    ]
+    if not reports:
+        print(
+            f'No analyzers available for type {obs_type!r}. '
+            'Set PYSOAR_ANALYZER_<ID>_API_KEY or PYSOAR_MOCK_ANALYZERS=1.'
+        )
+        return 1
+    print(json.dumps(reports, indent=2))
+    return 0
+
+
 def convert_intel_cli(input_path, source_format, target_format, output_path=None):
     import json
     from pathlib import Path
@@ -358,6 +399,10 @@ def main_cli():
         sys.exit(history_cli(args.history))
     if args.list_sensors:
         sys.exit(list_sensors_cli())
+    if args.list_analyzers:
+        sys.exit(list_analyzers_cli())
+    if args.analyze:
+        sys.exit(analyze_cli(args.analyze[0], args.analyze[1]))
     if args.convert_intel:
         sys.exit(
             convert_intel_cli(

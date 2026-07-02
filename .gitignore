@@ -167,6 +167,7 @@ config/misp.yaml
 config/pfsense.yaml
 secrets/
 lab/.env
+PySOAR.audit.jsonl
 README_LOCAL.md 
 feeds/
 playbooks/*

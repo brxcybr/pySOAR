@@ -98,6 +98,11 @@ def parse_arguments():
         default=300,
         help='Scheduler interval in seconds (default: 300)',
     )
+    parser.add_argument(
+        '--list-actions',
+        action='store_true',
+        help='List registered action manifests and exit',
+    )
     return parser.parse_args()
 
 
@@ -177,6 +182,17 @@ def list_playbooks_cli():
     return 0
 
 
+def list_actions_cli():
+    from core.manifests import ManifestRegistry
+
+    registry = ManifestRegistry.get_instance()
+    for manifest in registry.all_manifests():
+        print(
+            f"{manifest.name}\t{manifest.integration}\t{manifest.risk}\t{manifest.category}"
+        )
+    return 0
+
+
 def serve_api_cli(host='127.0.0.1', port=8088):
     from api_server import serve
     log.info(f"Starting PySOAR API on {host}:{port}")
@@ -221,6 +237,8 @@ def main_cli():
         sys.exit(set_secret_cli(args.set_secret, api_key=args.api_key))
     if args.list_playbooks:
         sys.exit(list_playbooks_cli())
+    if args.list_actions:
+        sys.exit(list_actions_cli())
     if args.serve_api:
         sys.exit(serve_api_cli(host=args.host, port=args.port))
     if args.scheduler:

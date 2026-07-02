@@ -1,0 +1,10 @@
+name: create_misp_event
+integration: misp
+category: action
+play_type: action
+risk: medium
+producer: true
+method: create_misp_event
+description: Create a new MISP event.
+outputs:
+  - message

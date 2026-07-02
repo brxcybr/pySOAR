@@ -1,0 +1,15 @@
+name: add_firewall_rule
+integration: pfsense
+category: responder
+play_type: responder
+risk: high
+producer: false
+method: add_firewall_rule
+description: Add pfSense firewall block/pass rules for source addresses.
+inputs:
+  - name: ip-dst
+    type: observable
+    maps_to: src
+outputs:
+  - ip-dst
+  - pfsense-firewall-status

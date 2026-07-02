@@ -1,0 +1,14 @@
+name: get_misp_event_by_type
+integration: misp
+category: action
+play_type: action
+risk: low
+producer: true
+method: get_event_data_by_type
+description: Fetch MISP attributes for a given observable type.
+inputs:
+  - name: ip-dst
+    type: observable
+outputs:
+  - ip-dst
+  - domain

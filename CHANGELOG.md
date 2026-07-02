@@ -2,6 +2,24 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.5.0] - 2026-07-01
+
+### Added — Phase 0 foundation
+- `core/` package: plugin registry, action manifests, observable schema v1, audit log, API auth
+- YAML manifests under `integrations/manifests/` for MISP, pfSense, CrowdSec actions
+- Entry-point plugin registration (`pysoar.integrations`)
+- `--list-actions` CLI and `GET /actions` API endpoint
+- Optional JSONL audit log (`PYSOAR_AUDIT_LOG`)
+- REST API Bearer token auth (`PYSOAR_API_TOKEN`)
+- Optional dependency groups: `analyzers`, `ansible` (placeholders), `all`
+- Phase 0 documentation and tests
+
+### Changed
+- `integrations/dispatch.py` reads producer/input/output/risk data from manifests
+- `playbook_validator.py` uses manifest risk tiers
+- `IntegrationManager` loads plugins via registry
+- Playbook execution writes audit events and syncs observable schema
+
 ## [0.4.0] - 2026-07-01
 
 ### Added

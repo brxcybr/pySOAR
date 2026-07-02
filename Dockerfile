@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt requirements-dev.txt requirements-api.txt setup.py pyproject.toml ./
 COPY integrations ./integrations
+COPY core ./core
 COPY classes.py menu.py pysoar.py secrets_manager.py triggers.py playbook_validator.py scheduler.py api_server.py ./
 
 RUN pip install --no-cache-dir -r requirements.txt \

@@ -1,0 +1,10 @@
+name: apply_changes
+integration: pfsense
+category: responder
+play_type: responder
+risk: high
+producer: false
+method: apply_changes
+description: Apply pending pfSense firewall configuration changes.
+outputs:
+  - pfsense-firewall-status

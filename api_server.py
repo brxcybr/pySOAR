@@ -3,22 +3,46 @@
 from typing import Optional
 
 from classes import ConfigurationManager, Log
+from core.api_auth import verify_api_token, api_auth_enabled
+from core.manifests import ManifestRegistry
 from integrations.health import check_playbook_integrations
 from playbook_validator import validate_playbook, format_validation_result
 
 
 def create_app(config_mgr: Optional[ConfigurationManager] = None):
-    from fastapi import FastAPI, HTTPException
+    from fastapi import Depends, FastAPI, Header, HTTPException
+    from fastapi.responses import JSONResponse
     from pydantic import BaseModel
 
     log = Log.get_instance()
     app = FastAPI(
         title='PySOAR API',
         description='REST interface for playbook and integration management',
-        version='0.4.0',
+        version='0.5.0',
     )
     cm = config_mgr or ConfigurationManager()
     pm = cm.playbook_mgr
+
+    def require_auth(authorization: Optional[str] = Header(None)):
+        if not verify_api_token(authorization):
+            raise HTTPException(status_code=401, detail='Invalid or missing API token')
+        return True
+
+    auth_dependency = [Depends(require_auth)] if api_auth_enabled() else []
+
+    @app.middleware('http')
+    async def auth_middleware(request, call_next):
+        if not api_auth_enabled():
+            return await call_next(request)
+        public_paths = {'/health', '/docs', '/openapi.json', '/redoc'}
+        if request.url.path in public_paths:
+            return await call_next(request)
+        if not verify_api_token(request.headers.get('Authorization')):
+            return JSONResponse(
+                status_code=401,
+                content={'detail': 'Invalid or missing API token'},
+            )
+        return await call_next(request)
 
     class RunRequest(BaseModel):
         once: bool = True
@@ -30,9 +54,30 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
 
     @app.get('/health')
     def health():
-        return {'status': 'ok', 'service': 'pysoar-api'}
+        return {
+            'status': 'ok',
+            'service': 'pysoar-api',
+            'auth_required': api_auth_enabled(),
+        }
 
-    @app.get('/playbooks')
+    @app.get('/actions', dependencies=auth_dependency)
+    def list_actions():
+        registry = ManifestRegistry.get_instance()
+        return [
+            {
+                'name': manifest.name,
+                'integration': manifest.integration,
+                'category': manifest.category,
+                'risk': manifest.risk,
+                'play_type': manifest.play_type,
+                'producer': manifest.producer,
+                'outputs': manifest.outputs,
+                'description': manifest.description,
+            }
+            for manifest in registry.all_manifests()
+        ]
+
+    @app.get('/playbooks', dependencies=auth_dependency)
     def list_playbooks():
         pm._load_all_playbooks_if_required()
         return [
@@ -44,7 +89,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             for name in pm.playbook_names
         ]
 
-    @app.get('/playbooks/{name}')
+    @app.get('/playbooks/{name}', dependencies=auth_dependency)
     def get_playbook(name: str):
         pm._load_all_playbooks_if_required()
         if name not in pm.playbook_names:
@@ -57,7 +102,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             'logic_steps': len(data.get('logic', [])),
         }
 
-    @app.post('/playbooks/{name}/validate')
+    @app.post('/playbooks/{name}/validate', dependencies=auth_dependency)
     def validate_playbook_endpoint(name: str):
         from classes import Playbook
 
@@ -79,7 +124,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             ],
         }
 
-    @app.get('/playbooks/{name}/health')
+    @app.get('/playbooks/{name}/health', dependencies=auth_dependency)
     def playbook_health(name: str):
         from classes import Playbook
 
@@ -97,7 +142,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             for r in results
         ]
 
-    @app.post('/playbooks/{name}/run')
+    @app.post('/playbooks/{name}/run', dependencies=auth_dependency)
     def run_playbook(name: str, body: RunRequest = RunRequest()):
         pm._load_all_playbooks_if_required()
         if name not in pm.playbook_names:
@@ -114,7 +159,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {'status': 'completed', 'playbook': name, 'once': body.once}
 
-    @app.get('/integrations')
+    @app.get('/integrations', dependencies=auth_dependency)
     def list_integrations():
         cm.update_enabled_items()
         return [
@@ -127,16 +172,14 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
             for item in cm.enabled_integrations
         ]
 
-    @app.get('/scheduler/jobs')
+    @app.get('/scheduler/jobs', dependencies=auth_dependency)
     def scheduler_jobs():
-        from scheduler import PlaybookScheduler
-
         sched = getattr(app.state, 'scheduler', None)
         if sched is None:
             return []
         return sched.list_jobs()
 
-    @app.post('/scheduler/playbooks/{name}')
+    @app.post('/scheduler/playbooks/{name}', dependencies=auth_dependency)
     def schedule_playbook(name: str, body: ScheduleRequest = ScheduleRequest()):
         from scheduler import PlaybookScheduler
 

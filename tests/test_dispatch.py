@@ -52,7 +52,7 @@ class TestDispatchHelpers(unittest.TestCase):
 
 class TestPlaybookFunctionExecute(unittest.TestCase):
     @patch.object(ConfigurationManager, "resolve_callable")
-    @patch("classes.find_integration_for_function")
+    @patch("integrations.dispatch.find_integration_for_function")
     def test_execute_returns_shared_data_first(self, mock_find, mock_resolve):
         integration = MagicMock()
         integration.returns = ["ip-dst"]

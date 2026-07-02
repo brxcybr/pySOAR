@@ -1,0 +1,13 @@
+name: enable_threat_feed
+integration: misp
+category: action
+play_type: action
+risk: low
+producer: true
+method: enable_threat_feed
+description: Enable a MISP threat feed for the requested data type.
+inputs:
+  - name: ip-dst
+    type: observable
+outputs:
+  - feed_id

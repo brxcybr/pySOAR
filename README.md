@@ -34,7 +34,7 @@ make lab-down
 
 See [docs/lab/docker-compose.md](docs/lab/docker-compose.md).
 
-## Features (v0.4.0)
+## Features (v0.5.0)
 
 | Capability | Description |
 |---|---|
@@ -44,7 +44,8 @@ See [docs/lab/docker-compose.md](docs/lab/docker-compose.md).
 | Triggers | `always`, `time`, declarative `condition` |
 | Secrets | Fernet-encrypted API key vault + CLI management |
 | CLI | Non-interactive playbook runs, secrets migration |
-| REST API | FastAPI server for playbook run, validation, scheduling |
+| Foundation | Plugin registry, action manifests, observable schema v1, audit log |
+| REST API | FastAPI server with optional Bearer token auth |
 | Mock mode | Offline MISP and pfSense for dev/CI |
 
 ## CLI reference
@@ -56,6 +57,7 @@ python3 pysoar.py --list-playbooks
 python3 pysoar.py --init-secrets
 python3 pysoar.py --migrate-secrets
 python3 pysoar.py --set-secret misp
+python3 pysoar.py --list-actions
 python3 pysoar.py --serve-api --host 0.0.0.0 --port 8088
 python3 pysoar.py --scheduler test --interval 300 --once
 ```

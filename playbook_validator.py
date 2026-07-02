@@ -2,7 +2,35 @@
 
 from dataclasses import dataclass, field
 
-from integrations.dispatch import PRODUCER_FUNCTIONS, FUNCTION_OUTPUT_KEYS, FUNCTION_INPUT_MAPPING
+from integrations.dispatch import producer_functions, function_input_mapping
+from core.manifests import ManifestRegistry
+
+_LEGACY_HIGH_RISK = {
+    'add_firewall_rule',
+    'delete_firewall_rule',
+    'ban_ip',
+    'sync_blocklist',
+    'apply_changes',
+}
+
+
+def _high_risk_functions():
+    return ManifestRegistry.get_instance().high_risk_functions() | _LEGACY_HIGH_RISK
+
+
+def _blocked_first_functions():
+    return ManifestRegistry.get_instance().blocked_first_functions() | _LEGACY_HIGH_RISK | {
+        'unban_ip',
+    }
+
+
+def _producer_functions():
+    return producer_functions()
+
+
+PRODUCER_FUNCTIONS = _producer_functions()
+HIGH_RISK_FUNCTIONS = _high_risk_functions()
+BLOCKED_FIRST_FUNCTIONS = _blocked_first_functions()
 
 
 @dataclass
@@ -26,22 +54,6 @@ class ValidationResult:
 
     def add_warning(self, code, message):
         self.warnings.append(ValidationIssue('warning', code, message))
-
-
-# Functions that can cause immediate network impact if misused.
-HIGH_RISK_FUNCTIONS = {
-    'add_firewall_rule',
-    'delete_firewall_rule',
-    'ban_ip',
-    'sync_blocklist',
-    'apply_changes',
-}
-
-# Functions that should not appear as the first step without context.
-BLOCKED_FIRST_FUNCTIONS = HIGH_RISK_FUNCTIONS | {
-    'delete_firewall_rule',
-    'unban_ip',
-}
 
 
 def _function_names(logic):
@@ -135,13 +147,16 @@ def validate_playbook(playbook, config_mgr=None):
                 )
 
         if step.name in PRODUCER_FUNCTIONS:
-            output_key = FUNCTION_OUTPUT_KEYS.get(step.name)
+            output_key = None
+            manifest = ManifestRegistry.get_instance().get(step.name)
+            if manifest:
+                output_key = manifest.primary_output
             if output_key:
                 available_data.add(output_key)
             elif step.data_dependencies:
                 available_data.update(step.data_dependencies)
 
-        for shared_key in FUNCTION_INPUT_MAPPING.get(step.name, {}):
+        for shared_key in function_input_mapping().get(step.name, {}):
             available_data.add(shared_key)
 
         trigger_type = getattr(step, 'trigger_type', '') or step.trigger.get('type', '')

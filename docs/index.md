@@ -7,6 +7,7 @@
 | [Testing](guides/testing.md) | pytest, mock mode, CI |
 | [Adding integrations](guides/adding-integrations.md) | Plugin development |
 | [Architecture overview](architecture/overview.md) | System design |
+| [Phase 0 foundation](architecture/phase0-foundation.md) | Plugin registry, manifests, observables |
 | [Docker lab](lab/docker-compose.md) | One-command test environment |
 | [GNS3 topology](lab/gns3-topology.md) | Full network lab guide |
 | [REST API](api/rest-api.md) | FastAPI endpoints |

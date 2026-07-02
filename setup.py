@@ -2,9 +2,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="pysoar",
-    version="0.4.0",
+    version="0.5.0",
     description="A lightweight Python SOAR framework for edge and SOHO networks",
     packages=find_packages(),
+    package_data={
+        "integrations": ["manifests/**/*.yaml"],
+    },
+    include_package_data=True,
     py_modules=[
         "classes",
         "menu",
@@ -26,6 +30,13 @@ setup(
     entry_points={
         "console_scripts": [
             "pysoar=pysoar:main_cli",
+        ],
+        "pysoar.integrations": [
+            "misp=integrations.misp_functions:MispFunction",
+            "pfsense=integrations.pfsense_functions:PfsenseFunction",
+            "crowdsec=integrations.crowdsec_functions:CrowdsecFunction",
+            "webhook=integrations.webhook_functions:WebhookFunction",
+            "opnsense=integrations.opnsense_functions:OpnsenseFunction",
         ],
     },
 )

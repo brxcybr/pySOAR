@@ -1,0 +1,15 @@
+name: ban_ip
+integration: crowdsec
+category: responder
+play_type: responder
+risk: high
+producer: false
+method: ban_ip
+description: Ban IP addresses via CrowdSec LAPI.
+inputs:
+  - name: ip-dst
+    type: observable
+    maps_to: ip_dst
+outputs:
+  - ip-dst
+  - crowdsec-decision-id

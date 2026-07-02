@@ -1,0 +1,13 @@
+name: delete_firewall_rule
+integration: pfsense
+category: responder
+play_type: responder
+risk: critical
+producer: false
+method: delete_firewall_rule
+description: Delete a pfSense firewall rule by tracker ID.
+inputs:
+  - name: pfsense-firewall-rule-tracker
+    type: string
+outputs:
+  - pfsense-firewall-status

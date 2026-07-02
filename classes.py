@@ -522,10 +522,11 @@ class IntegrationManager:
             return self._integration_class_cache[integration_name]
 
         try:
-            module = import_module(f"integrations.{integration_name}_functions")
-            class_name = integration_name.capitalize() + 'Function'
-            cls = getattr(module, class_name)
-            # ... rest of the method ...
+            from core.plugin_registry import PluginRegistry
+
+            cls = PluginRegistry.get_instance().get_class(integration_name)
+            if cls is None:
+                raise ImportError(f"No plugin registered for integration '{integration_name}'")
         except ImportError as e:
             raise Exception(f"Could not import the specified module: {e}")
         
@@ -809,16 +810,40 @@ class PlaybookManager:
         playbook.clear_stop()
         config_mgr._active_playbook = playbook
 
+        from core.audit_log import AuditLog
+        from core.observables import wrap_shared_data
+
+        audit = AuditLog.get_instance()
+        run_status = 'completed'
+        audit.start_run(playbook.name, {'once': once, 'max_cycles': max_cycles})
+
         try:
             while current_function.name != "halt_playbook":
                 if playbook.should_stop():
                     self.log.info(f"Playbook {playbook.name} stop requested.")
+                    run_status = 'stopped'
                     break
 
+                audit.step_start(current_function.name, shared_data)
                 self.log.debug(
                     f"Executing {current_function.name} in {playbook.name} with data {shared_data}"
                 )
-                shared_data, next_function_name = current_function.execute(shared_data, config_mgr)
+                try:
+                    shared_data, next_function_name = current_function.execute(
+                        shared_data, config_mgr
+                    )
+                except Exception as step_exc:
+                    audit.step_error(current_function.name, str(step_exc))
+                    raise
+                wrap_shared_data(shared_data).sync_from_legacy(
+                    source=current_function.name
+                )
+                audit.step_end(
+                    current_function.name,
+                    success=True,
+                    next_step=next_function_name,
+                    shared_data=shared_data,
+                )
                 iteration += 1
 
                 if next_function_name == "halt_playbook":
@@ -842,12 +867,14 @@ class PlaybookManager:
                         break
         except Exception as e:
             playbook.is_running = False
+            run_status = 'failed'
             self.log.error(f"Error running playbook {playbook.name}: {e}")
             self.log.error(traceback.format_exc())
             raise
         finally:
             playbook.is_running = False
             config_mgr._active_playbook = None
+            audit.end_run(playbook.name, run_status, steps=iteration, cycles=cycles)
 
         self.log.info(
             f"Playbook {playbook.name} finished after {iteration} step(s), {cycles} cycle(s)."
@@ -1227,8 +1254,9 @@ class PlaybookFunction:
             self.log.info(f"Function {self.name} skipped; trigger condition not met.")
             return shared_data, self.on_fail
 
-        from integrations.dispatch import PRODUCER_FUNCTIONS
-        if self.data_dependencies and self.name not in PRODUCER_FUNCTIONS:
+        from integrations.dispatch import producer_functions, build_kwargs, merge_result, is_success, find_integration_for_function
+
+        if self.data_dependencies and self.name not in producer_functions():
             needs = {dep: shared_data.get(dep) for dep in self.data_dependencies}
             if any(value is None for value in needs.values()):
                 raise Exception(

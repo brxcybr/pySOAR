@@ -2,25 +2,27 @@
 
 import inspect
 
+from core.manifests import ManifestRegistry
+
 FUNCTION_ALIASES = {
     "get_misp_event_by_type": "get_event_data_by_type",
     "get_firewall_logs_by_daterange": "get_firewall_logs_by_datetimerange",
 }
 
-# Functions that populate shared_data rather than consume it.
-PRODUCER_FUNCTIONS = {
+# Legacy defaults used when manifests are absent.
+_LEGACY_PRODUCER_FUNCTIONS = {
     "get_misp_event_by_type",
     "get_event_data_by_type",
     "enable_threat_feed",
     "create_misp_event",
 }
 
-FUNCTION_OUTPUT_KEYS = {
+_LEGACY_FUNCTION_OUTPUT_KEYS = {
     "get_misp_event_by_type": "ip-dst",
     "get_event_data_by_type": "ip-dst",
 }
 
-FUNCTION_INPUT_MAPPING = {
+_LEGACY_FUNCTION_INPUT_MAPPING = {
     "add_firewall_rule": {"ip-dst": "src"},
     "ban_ip": {"ip-dst": "ip_dst"},
     "sync_blocklist": {"ip-dst": "ip_dst"},
@@ -29,11 +31,52 @@ FUNCTION_INPUT_MAPPING = {
 }
 
 
+def _registry():
+    return ManifestRegistry.get_instance()
+
+
+def producer_functions():
+    manifest_producers = _registry().producer_functions()
+    return manifest_producers | _LEGACY_PRODUCER_FUNCTIONS
+
+
+def function_output_keys():
+    merged = dict(_LEGACY_FUNCTION_OUTPUT_KEYS)
+    merged.update(_registry().function_output_keys())
+    return merged
+
+
+def function_input_mapping():
+    merged = dict(_LEGACY_FUNCTION_INPUT_MAPPING)
+    for name, mapping in _registry().function_input_mapping().items():
+        merged.setdefault(name, {}).update(mapping)
+    return merged
+
+
+# Backward-compatible module-level sets/dicts (computed at import).
+PRODUCER_FUNCTIONS = producer_functions()
+FUNCTION_OUTPUT_KEYS = function_output_keys()
+FUNCTION_INPUT_MAPPING = function_input_mapping()
+
+
 def resolve_method_name(function_name):
+    manifest = _registry().get(function_name)
+    if manifest and manifest.method:
+        return manifest.method
     return FUNCTION_ALIASES.get(function_name, function_name)
 
 
 def find_integration_for_function(config_mgr, function_name):
+    manifest_integration = _registry().integration_for_function(function_name)
+    if manifest_integration:
+        for integration in config_mgr.enabled_integrations:
+            if integration.name == manifest_integration:
+                if function_name in integration.playbook_functions:
+                    return integration
+                alias = resolve_method_name(function_name)
+                if alias in integration.playbook_functions:
+                    return integration
+
     for integration in config_mgr.enabled_integrations:
         if function_name in integration.playbook_functions:
             return integration
@@ -59,12 +102,12 @@ def build_kwargs(function_name, method, shared_data, data_dependencies):
             kwargs["feed_id"] = shared_data["feed_id"]
         return kwargs
 
-    input_map = FUNCTION_INPUT_MAPPING.get(function_name, {})
+    input_map = function_input_mapping().get(function_name, {})
     for shared_key, param_name in input_map.items():
         if shared_key in shared_data and shared_data[shared_key] is not None:
             kwargs[param_name] = shared_data[shared_key]
 
-    if data_dependencies and function_name not in PRODUCER_FUNCTIONS:
+    if data_dependencies and function_name not in producer_functions():
         for dep in data_dependencies:
             if dep not in shared_data or shared_data[dep] is None:
                 continue
@@ -76,29 +119,31 @@ def build_kwargs(function_name, method, shared_data, data_dependencies):
 
 
 def merge_result(shared_data, function_name, result, integration_returns=None):
-    if result is None:
-        return shared_data
+    from core.observables import wrap_shared_data
 
-    output_key = FUNCTION_OUTPUT_KEYS.get(function_name)
+    ctx = wrap_shared_data(shared_data)
+    data = ctx.raw
+
+    output_key = function_output_keys().get(function_name)
     if output_key and not isinstance(result, dict):
-        shared_data[output_key] = result
-        return shared_data
+        data[output_key] = result
+        ctx.sync_from_legacy(source=function_name)
+        return data
 
     if isinstance(result, dict):
         for key, value in result.items():
-            if integration_returns and key not in integration_returns and key not in shared_data:
+            if integration_returns and key not in integration_returns and key not in data:
                 continue
-            shared_data[key] = value
-        return shared_data
+            data[key] = value
+        ctx.sync_from_legacy(source=function_name)
+        return data
 
     if integration_returns:
-        for key in integration_returns:
-            if key in shared_data:
-                continue
         if len(integration_returns) == 1:
-            shared_data[integration_returns[0]] = result
+            data[integration_returns[0]] = result
 
-    return shared_data
+    ctx.sync_from_legacy(source=function_name)
+    return data
 
 
 def is_success(result):

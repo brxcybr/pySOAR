@@ -2,6 +2,16 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [0.6.1] - 2026-07-02
+
+### Fixed — CIDM adapter hardening
+- OpenIOC: indicator pattern now uses the indicator `id` attribute (was a leaked loop variable); XML export escapes special characters
+- YARA: brace-aware rule parsing handles hex-string patterns (`{ 6A 40 }`), rule tags (`rule x : trojan {`), and `global`/`private` modifiers
+- SIGMA: empty-bundle export no longer crashes; IOC extraction validates IPs (`ipaddress`, incl. IPv6) and classifies URLs/domains/hashes instead of emitting generic noise
+- STIX 2.x: export produces valid STIX 2.1 (object `id`s, `created`/`modified`, indicator `valid_from`/`pattern_type`); IPv6 SCOs parsed and exported as `ipv6-addr`; file hashes typed by length (MD5/SHA-1/SHA-256)
+- Observables adapter: only promotes standard observable keys from shared_data (skips `feed_id` etc.)
+- CIDM model: tolerant `from_dict` with clear `ValueError` for malformed bundle content (clean API 400s instead of raw `KeyError`)
+
 ## [0.6.0] - 2026-07-01
 
 ### Added — CIDM threat intelligence hub

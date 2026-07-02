@@ -34,8 +34,8 @@ class CIDMObservable:
     @classmethod
     def from_dict(cls, data: dict) -> 'CIDMObservable':
         return cls(
-            type=data['type'],
-            value=str(data['value']),
+            type=data.get('type', 'generic'),
+            value=str(data.get('value', '')),
             labels=list(data.get('labels') or []),
             source_format=data.get('source_format', ''),
             external_refs=list(data.get('external_refs') or []),
@@ -197,6 +197,10 @@ class CIDMBundle:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'CIDMBundle':
+        if not isinstance(data, dict):
+            raise ValueError(
+                f'CIDM bundle must be a JSON object, got {type(data).__name__}'
+            )
         return cls(
             schema_version=data.get('schema_version', '1.0'),
             id=data.get('id', _new_id()),
@@ -208,7 +212,7 @@ class CIDMBundle:
             ],
             indicators=[
                 CIDMIndicator(
-                    pattern=i['pattern'],
+                    pattern=i.get('pattern', ''),
                     pattern_type=i.get('pattern_type', 'stix'),
                     valid_from=i.get('valid_from'),
                     valid_until=i.get('valid_until'),
@@ -223,9 +227,9 @@ class CIDMBundle:
             ],
             detection_rules=[
                 CIDMDetectionRule(
-                    rule_format=r['rule_format'],
-                    name=r['name'],
-                    content=r['content'],
+                    rule_format=r.get('rule_format', ''),
+                    name=r.get('name', ''),
+                    content=r.get('content', ''),
                     severity=r.get('severity', 'medium'),
                     tags=list(r.get('tags') or []),
                     metadata=dict(r.get('metadata') or {}),
@@ -234,8 +238,8 @@ class CIDMBundle:
             ],
             attack_patterns=[
                 CIDMAttackPattern(
-                    external_id=a['external_id'],
-                    name=a['name'],
+                    external_id=a.get('external_id', ''),
+                    name=a.get('name', ''),
                     description=a.get('description', ''),
                     tactics=list(a.get('tactics') or []),
                     platforms=list(a.get('platforms') or []),
@@ -245,16 +249,16 @@ class CIDMBundle:
             ],
             relationships=[
                 CIDMRelationship(
-                    relationship_type=r['relationship_type'],
-                    source_ref=r['source_ref'],
-                    target_ref=r['target_ref'],
+                    relationship_type=r.get('relationship_type', ''),
+                    source_ref=r.get('source_ref', ''),
+                    target_ref=r.get('target_ref', ''),
                     metadata=dict(r.get('metadata') or {}),
                 )
                 for r in data.get('relationships', [])
             ],
             openc2_commands=[
                 CIDMOpenC2Command(
-                    action=c['action'],
+                    action=c.get('action', ''),
                     target=dict(c.get('target') or {}),
                     args=dict(c.get('args') or {}),
                     metadata=dict(c.get('metadata') or {}),

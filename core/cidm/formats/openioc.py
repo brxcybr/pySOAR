@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from typing import Union
+from xml.sax.saxutils import escape
 
 from core.cidm.formats.base import IntelFormatAdapter
 from core.cidm.model import CIDMBundle, CIDMObservable, CIDMIndicator
@@ -24,7 +25,9 @@ class OpenIocAdapter(IntelFormatAdapter):
             title=(short.text if short is not None else 'OpenIOC'),
         )
         indicators = []
-        for indicator in root.findall('.//ioc:Indicator', ns) or root.findall('.//Indicator'):
+        indicator_nodes = root.findall('.//ioc:Indicator', ns) or root.findall('.//Indicator')
+        for index, indicator in enumerate(indicator_nodes):
+            indicator_id = indicator.get('id', '') or f'indicator-{index}'
             obs_list = []
             for node in indicator.iter():
                 tag = node.tag.split('}')[-1]
@@ -40,9 +43,10 @@ class OpenIocAdapter(IntelFormatAdapter):
             if obs_list:
                 indicators.append(
                     CIDMIndicator(
-                        pattern=f'openioc:{tag}',
+                        pattern=f'openioc:{indicator_id}',
                         pattern_type='openioc',
                         observables=obs_list,
+                        metadata={'openioc_id': indicator_id},
                     )
                 )
         cidm.indicators = indicators
@@ -58,7 +62,7 @@ class OpenIocAdapter(IntelFormatAdapter):
         lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<OpenIOC xmlns="http://openioc.org/schemas/OpenIOC_1.1">',
-            f'<short_description>{bundle.title or "PySOAR export"}</short_description>',
+            f'<short_description>{escape(bundle.title or "PySOAR export")}</short_description>',
             '<criteria><Indicator operator="OR">',
         ]
         for obs in bundle.observables:
@@ -70,6 +74,6 @@ class OpenIocAdapter(IntelFormatAdapter):
                 'filename': 'FileItem',
                 'email': 'EmailItem',
             }.get(obs.type, 'AddressItem')
-            lines.append(f'<{item}><Content>{obs.value}</Content></{item}>')
+            lines.append(f'<{item}><Content>{escape(obs.value)}</Content></{item}>')
         lines.extend(['</Indicator></criteria>', '</OpenIOC>'])
         return '\n'.join(lines)

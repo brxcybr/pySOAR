@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Union
+import ipaddress
+import re
+from typing import Optional, Union
 
 import yaml
 
 from core.cidm.formats.base import IntelFormatAdapter
 from core.cidm.model import CIDMBundle, CIDMDetectionRule, CIDMObservable
 from core.cidm.types import IntelFormat
+
+_HASH_RE = re.compile(r'^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$')
+_DOMAIN_RE = re.compile(r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
 
 
 class SigmaAdapter(IntelFormatAdapter):
@@ -49,24 +54,46 @@ class SigmaAdapter(IntelFormatAdapter):
         for key, value in detection.items():
             if key in ('condition', 'keywords'):
                 continue
-            if isinstance(value, dict):
-                for field, pattern in value.items():
-                    if isinstance(pattern, str) and self._looks_like_ioc(pattern):
-                        obs_type = 'ip-dst' if self._looks_like_ip(pattern) else 'generic'
+            if not isinstance(value, dict):
+                continue
+            for _field, pattern in value.items():
+                candidates = pattern if isinstance(pattern, list) else [pattern]
+                for candidate in candidates:
+                    if not isinstance(candidate, str):
+                        continue
+                    obs_type = self._classify_ioc(candidate)
+                    if obs_type:
                         cidm.add_observable(
-                            CIDMObservable(obs_type, pattern, source_format=self.format_id)
+                            CIDMObservable(obs_type, candidate, source_format=self.format_id)
                         )
 
-    def _looks_like_ioc(self, value: str) -> bool:
-        return bool(value) and '|' not in value and len(value) < 256
+    def _classify_ioc(self, value: str) -> Optional[str]:
+        """Classify a detection value as an observable type, or None to skip.
 
-    def _looks_like_ip(self, value: str) -> bool:
-        parts = value.split('.')
-        return len(parts) == 4 and all(part.isdigit() for part in parts)
+        Only obvious atomic indicators (IP, URL, domain, hash) are promoted;
+        generic strings like event IDs or process names are left in the rule.
+        """
+        value = value.strip()
+        if not value or '|' in value or len(value) > 512:
+            return None
+        try:
+            ipaddress.ip_address(value)
+            return 'ip-dst'
+        except ValueError:
+            pass
+        if value.startswith(('http://', 'https://')):
+            return 'url'
+        if _HASH_RE.match(value):
+            return 'hash'
+        if _DOMAIN_RE.match(value):
+            return 'domain'
+        return None
 
     def serialize(self, bundle: CIDMBundle) -> str:
         docs = []
         for rule in bundle.detection_rules:
             if rule.rule_format == 'sigma':
                 docs.append(yaml.safe_load(rule.content))
+        if not docs:
+            return ''
         return yaml.safe_dump(docs if len(docs) > 1 else docs[0], sort_keys=False)

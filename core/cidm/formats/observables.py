@@ -7,6 +7,7 @@ from typing import Union
 from core.cidm.formats.base import IntelFormatAdapter
 from core.cidm.model import CIDMBundle, CIDMObservable
 from core.cidm.types import IntelFormat
+from core.observables import STANDARD_OBSERVABLE_TYPES
 
 
 class ObservablesAdapter(IntelFormatAdapter):
@@ -26,7 +27,9 @@ class ObservablesAdapter(IntelFormatAdapter):
         for item in data.get('observables', []):
             cidm.add_observable(CIDMObservable.from_dict(item))
         for key, value in data.items():
-            if key in ('observables', 'schema_version', 'cidm_bundle'):
+            # Only promote known observable keys; skip control keys such as
+            # feed_id or playbook bookkeeping values in shared_data.
+            if key not in STANDARD_OBSERVABLE_TYPES:
                 continue
             if isinstance(value, list):
                 for entry in value:

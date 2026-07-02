@@ -18,7 +18,7 @@ def create_app(config_mgr: Optional[ConfigurationManager] = None):
     app = FastAPI(
         title='PySOAR API',
         description='REST interface for playbook and integration management',
-        version='0.6.0',
+        version='0.6.1',
     )
     cm = config_mgr or ConfigurationManager()
     pm = cm.playbook_mgr

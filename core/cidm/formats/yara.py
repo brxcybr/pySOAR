@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Union
+from typing import Optional, Union
 
 from core.cidm.formats.base import IntelFormatAdapter
 from core.cidm.model import CIDMBundle, CIDMDetectionRule, CIDMObservable
@@ -14,9 +14,12 @@ class YaraAdapter(IntelFormatAdapter):
     format_id = IntelFormat.YARA.value
     display_name = 'YARA'
 
-    _rule_re = re.compile(
-        r'rule\s+(?P<name>\w+)\s*\{(?P<body>.*?)\}',
-        re.DOTALL | re.IGNORECASE,
+    # Matches the rule declaration up to the opening brace, including
+    # optional global/private modifiers and rule tags (rule name : tag1 tag2 {).
+    _rule_start_re = re.compile(
+        r'^\s*(?:(?:global|private)\s+)*rule\s+(?P<name>\w+)'
+        r'(?:\s*:\s*(?P<tags>[\w\s]+?))?\s*\{',
+        re.MULTILINE,
     )
     _string_hash_re = re.compile(
         r'\$[\w]+\s*=\s*"(?P<hash>[a-fA-F0-9]{32,64})"',
@@ -25,15 +28,18 @@ class YaraAdapter(IntelFormatAdapter):
     def parse(self, content: Union[str, bytes, dict]) -> CIDMBundle:
         text = content if isinstance(content, str) else content.decode()
         cidm = CIDMBundle(source_format=self.format_id, title='YARA rules')
-        for match in self._rule_re.finditer(text):
+        for match in self._rule_start_re.finditer(text):
             name = match.group('name')
-            body = match.group('body')
+            declared_tags = (match.group('tags') or '').split()
+            body, end = self._read_braced_block(text, match.end())
+            if body is None:
+                continue
             cidm.detection_rules.append(
                 CIDMDetectionRule(
                     rule_format='yara',
                     name=name,
-                    content=f'rule {name} {{{body}}}',
-                    tags=self._meta_tags(body),
+                    content=text[match.start():end].strip(),
+                    tags=declared_tags + self._meta_tags(body),
                     metadata={'raw_meta': self._meta_block(body)},
                 )
             )
@@ -42,6 +48,41 @@ class YaraAdapter(IntelFormatAdapter):
                     CIDMObservable('hash', hash_match.group('hash'), source_format=self.format_id)
                 )
         return cidm
+
+    def _read_braced_block(self, text: str, start: int) -> tuple[Optional[str], int]:
+        """Scan from just after an opening brace to its matching close brace.
+
+        Brace-counts while skipping string literals and comments so hex
+        string patterns like ``{ 6A 40 68 }`` don't terminate the rule early.
+        """
+        depth = 1
+        i = start
+        n = len(text)
+        while i < n:
+            char = text[i]
+            if char == '"':
+                i += 1
+                while i < n and text[i] != '"':
+                    if text[i] == '\\':
+                        i += 1
+                    i += 1
+            elif char == '/' and i + 1 < n and text[i + 1] == '/':
+                while i < n and text[i] != '\n':
+                    i += 1
+                continue
+            elif char == '/' and i + 1 < n and text[i + 1] == '*':
+                i += 2
+                while i + 1 < n and not (text[i] == '*' and text[i + 1] == '/'):
+                    i += 1
+                i += 1
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i], i + 1
+            i += 1
+        return None, n
 
     def _meta_block(self, body: str) -> dict:
         meta = {}

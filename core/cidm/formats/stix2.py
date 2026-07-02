@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
-from typing import Any, Union
+import uuid
+from datetime import datetime, timezone
+from typing import Union
 
 from core.cidm.formats.base import IntelFormatAdapter
 from core.cidm.model import CIDMBundle, CIDMObservable, CIDMIndicator, CIDMAttackPattern, CIDMRelationship
 from core.cidm.types import IntelFormat, STIX_OBSERVABLE_MAP
+
+_SCO_TYPES = ('ipv4-addr', 'ipv6-addr', 'domain-name', 'url', 'file', 'email-addr')
+
+
+def _stix_id(stix_type: str) -> str:
+    return f'{stix_type}--{uuid.uuid4()}'
+
+
+def _now_utc() -> str:
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
 class Stix2Adapter(IntelFormatAdapter):
@@ -24,12 +37,13 @@ class Stix2Adapter(IntelFormatAdapter):
 
         try:
             import stix2
-
-            parsed = stix2.parse(payload, allow_custom=True)
-            return self._from_json(json.loads(parsed.serialize()))
         except ImportError:
             return self._from_json(payload)
+        try:
+            parsed = stix2.parse(payload, allow_custom=True)
+            return self._from_json(json.loads(parsed.serialize()))
         except Exception:
+            # Not strictly valid STIX; fall back to the tolerant parser.
             return self._from_json(payload)
 
     def _from_json(self, payload: dict) -> CIDMBundle:
@@ -82,9 +96,7 @@ class Stix2Adapter(IntelFormatAdapter):
                         metadata={'stix_id': obj_id},
                     )
                 )
-            elif obj_type.startswith('x-') or obj_type in (
-                'ipv4-addr', 'domain-name', 'url', 'file', 'email-addr'
-            ):
+            elif obj_type.startswith('x-') or obj_type in _SCO_TYPES:
                 obs = self._observable_from_sco(obj)
                 if obs:
                     cidm.add_observable(obs)
@@ -98,7 +110,7 @@ class Stix2Adapter(IntelFormatAdapter):
 
     def _observable_from_sco(self, obj: dict) -> CIDMObservable | None:
         obj_type = obj.get('type', '')
-        if obj_type == 'ipv4-addr':
+        if obj_type in ('ipv4-addr', 'ipv6-addr'):
             return CIDMObservable('ip-dst', obj.get('value', ''), source_format=self.format_id)
         if obj_type == 'domain-name':
             return CIDMObservable('domain', obj.get('value', ''), source_format=self.format_id)
@@ -117,7 +129,7 @@ class Stix2Adapter(IntelFormatAdapter):
 
     def _observables_from_pattern(self, pattern: str) -> list[CIDMObservable]:
         observables = []
-        for match in re.finditer(r"([\w\-]+(?::[\w\-]+)?)\s*=\s*'([^']+)'", pattern):
+        for match in re.finditer(r"([\w\-]+(?::[\w\-\.]+)?)\s*=\s*'([^']+)'", pattern):
             field = match.group(1)
             value = match.group(2)
             base = field.split(':')[0]
@@ -136,33 +148,22 @@ class Stix2Adapter(IntelFormatAdapter):
         return observables
 
     def serialize(self, bundle: CIDMBundle) -> dict:
+        """Serialize to a STIX 2.1 bundle with required ids and timestamps."""
+        now = _now_utc()
         objects = []
         for obs in bundle.observables:
-            stix_type = {
-                'ip-dst': 'ipv4-addr',
-                'domain': 'domain-name',
-                'url': 'url',
-                'email': 'email-addr',
-                'filename': 'file',
-            }.get(obs.type, 'x-pysoar-observable')
-            if stix_type == 'ipv4-addr':
-                objects.append({'type': 'ipv4-addr', 'value': obs.value})
-            elif stix_type == 'domain-name':
-                objects.append({'type': 'domain-name', 'value': obs.value})
-            elif stix_type == 'url':
-                objects.append({'type': 'url', 'value': obs.value})
-            elif stix_type == 'email-addr':
-                objects.append({'type': 'email-addr', 'value': obs.value})
-            elif obs.type == 'hash':
-                objects.append({'type': 'file', 'hashes': {'SHA-256': obs.value}})
-            else:
-                objects.append({'type': 'x-pysoar-observable', 'value': obs.value, 'obs_type': obs.type})
+            objects.append(self._sco_from_observable(obs))
         for indicator in bundle.indicators:
             objects.append(
                 {
                     'type': 'indicator',
+                    'spec_version': '2.1',
+                    'id': indicator.metadata.get('stix_id') or _stix_id('indicator'),
+                    'created': now,
+                    'modified': now,
                     'pattern': indicator.pattern,
-                    'pattern_type': indicator.pattern_type,
+                    'pattern_type': indicator.pattern_type or 'stix',
+                    'valid_from': indicator.valid_from or now,
                     'labels': indicator.labels,
                 }
             )
@@ -170,6 +171,10 @@ class Stix2Adapter(IntelFormatAdapter):
             objects.append(
                 {
                     'type': 'attack-pattern',
+                    'spec_version': '2.1',
+                    'id': technique.metadata.get('stix_id') or _stix_id('attack-pattern'),
+                    'created': now,
+                    'modified': now,
                     'name': technique.name,
                     'description': technique.description,
                     'external_references': [
@@ -182,6 +187,33 @@ class Stix2Adapter(IntelFormatAdapter):
             )
         return {
             'type': 'bundle',
-            'spec_version': '2.1',
+            'id': _stix_id('bundle'),
             'objects': objects,
+        }
+
+    def _sco_from_observable(self, obs: CIDMObservable) -> dict:
+        if obs.type in ('ip-dst', 'ip-src'):
+            stix_type = 'ipv4-addr'
+            try:
+                if ipaddress.ip_address(obs.value).version == 6:
+                    stix_type = 'ipv6-addr'
+            except ValueError:
+                pass
+            return {'type': stix_type, 'id': _stix_id(stix_type), 'value': obs.value}
+        if obs.type == 'domain':
+            return {'type': 'domain-name', 'id': _stix_id('domain-name'), 'value': obs.value}
+        if obs.type == 'url':
+            return {'type': 'url', 'id': _stix_id('url'), 'value': obs.value}
+        if obs.type == 'email':
+            return {'type': 'email-addr', 'id': _stix_id('email-addr'), 'value': obs.value}
+        if obs.type == 'hash':
+            algo = {32: 'MD5', 40: 'SHA-1', 64: 'SHA-256'}.get(len(obs.value), 'SHA-256')
+            return {'type': 'file', 'id': _stix_id('file'), 'hashes': {algo: obs.value}}
+        if obs.type == 'filename':
+            return {'type': 'file', 'id': _stix_id('file'), 'name': obs.value}
+        return {
+            'type': 'x-pysoar-observable',
+            'id': _stix_id('x-pysoar-observable'),
+            'value': obs.value,
+            'obs_type': obs.type,
         }

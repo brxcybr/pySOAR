@@ -4,6 +4,10 @@ All notable changes to PySOAR are documented in this file.
 
 ## [0.8.0] - 2026-07-02
 
+### Security
+- CVE-2026-49477 (soupsieve ReDoS, high severity): not present in this release. The vulnerable `soupsieve==2.5` pin existed only in the pre-modernization `requirements.txt` on `main` (a 2023 environment freeze, pulled transitively via `beautifulsoup4`/`extract-msg`). The curated dependency set introduced in v0.3.0+ does not resolve soupsieve at all; verified with `pip-audit` against the fully resolved tree (base + api/intel/dev extras): no known vulnerabilities
+- CI now runs `pip-audit` on every push/PR so dependency changes that introduce known-vulnerable packages fail the build
+
 ### Added — analyzers, ingestion, notifications, retries (vendor-agnostic)
 - `analyzers/` enrichment framework: `AnalyzerBase` contract with state-store response caching, per-analyzer rate limiting, mock mode (`PYSOAR_MOCK_ANALYZERS`), and entry-point discovery (`pysoar.analyzers`); API keys via `PYSOAR_ANALYZER_<ID>_API_KEY`
 - Reference analyzer plugins: VirusTotal, AbuseIPDB, AlienVault OTX, Shodan — normalized verdict (`benign|suspicious|malicious|unknown`) and 0–100 score

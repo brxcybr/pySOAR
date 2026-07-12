@@ -111,14 +111,18 @@ class MispFunction:
         return self.misp_api.add_event(event, pythonify=True)
 
     def enable_threat_feed(self, feed_id=None, data_type='ip-dst'):
-        """Enable a threat feed by id/name, or auto-enable for a data type."""
+        """Enable a threat feed by id/name, or auto-enable for a data type.
+
+        Returns the enabled feed id (str) on success so playbook shared_data
+        receives a real ``feed_id`` instead of a bare ``True``.
+        """
         if self._mock:
-            return True
+            return str(feed_id) if self._is_valid_feed_id(feed_id) else '1'
         if feed_id is None:
             return self.ensure_feed_enabled(data_type)
         self.misp_api.enable_feed(feed_id)
         self._cache_feed(feed_id)
-        return True
+        return str(feed_id)
 
     def disable_threat_feed(self, feed_id):
         """Disable a threat feed in MISP by its id or name."""
@@ -138,15 +142,26 @@ class MispFunction:
             )
         )
 
+    @staticmethod
+    def _is_valid_feed_id(feed_id):
+        """Reject booleans/empty values that leak from success returns."""
+        if feed_id is None or isinstance(feed_id, bool):
+            return False
+        text = str(feed_id).strip()
+        return bool(text) and text.lower() not in ('true', 'false', 'none')
+
     def ensure_feed_enabled(self, data_type):
-        """Ensure at least one feed for the given data type is enabled."""
+        """Ensure at least one feed for the given data type is enabled.
+
+        Returns the enabled feed id (str) on success, False on failure.
+        """
         potential_feeds = self.FEEDS_BY_DATA_TYPE.get(data_type, [])
         enabled_feed_name = next(
             (feed for feed in potential_feeds if feed in self.enabled_feeds),
             None,
         )
         if enabled_feed_name:
-            return True
+            return str(self.enabled_feeds[enabled_feed_name]['feed_id'])
 
         feed_to_enable = potential_feeds[0] if potential_feeds else None
         if not feed_to_enable:
@@ -159,13 +174,13 @@ class MispFunction:
             self.log.error(f"Feed '{feed_to_enable}' not found in MISP")
             return False
 
-        self.enable_threat_feed(feed_id)
+        enabled_id = self.enable_threat_feed(feed_id)
         self._feeds = self._get_feeds()
         self.enabled_feeds = self.get_enabled_feeds()
-        return True
+        return enabled_id
 
     def _resolve_feed_id(self, data_type='ip-dst', feed_id=None):
-        if feed_id is not None:
+        if self._is_valid_feed_id(feed_id):
             return str(feed_id)
         for feed_name, details in self.enabled_feeds.items():
             if details.get('data_types') == data_type:
@@ -189,7 +204,13 @@ class MispFunction:
 
     def get_event_id(self, feed_id):
         feed = self._get_cached_feed(feed_id)
-        return feed['Feed']['event_id']
+        if not isinstance(feed, dict):
+            raise ValueError(f"Unexpected feed payload for id {feed_id!r}: {feed!r}")
+        feed_body = feed.get('Feed', feed)
+        event_id = feed_body.get('event_id') if isinstance(feed_body, dict) else None
+        if event_id is None:
+            raise ValueError(f"Feed {feed_id!r} has no event_id: {feed!r}")
+        return event_id
 
     def _attribute_value(self, attr):
         if isinstance(attr, dict):

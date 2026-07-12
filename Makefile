@@ -12,25 +12,25 @@ bootstrap:
 	bash lab/scripts/bootstrap.sh
 
 lab-up: bootstrap
-	docker compose -f lab/docker-compose.yml --profile lab up -d --build
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile lab up -d --build
 	bash lab/scripts/wait-healthy.sh pfsense-mock 90
 
 lab-test: lab-up
-	docker compose -f lab/docker-compose.yml --profile lab run --rm pysoar --run-playbook test --once
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile lab run --rm pysoar --run-playbook test --once
 
 lab-down:
-	docker compose -f lab/docker-compose.yml --profile lab down -v
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile lab down -v
 
 lab-logs:
-	docker compose -f lab/docker-compose.yml --profile lab logs -f
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile lab logs -f
 
 lab-full-up:
 	LAB_PROFILE=full $(MAKE) bootstrap
-	docker compose -f lab/docker-compose.yml --profile full up -d --build
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile full up -d --build
 	bash lab/scripts/wait-healthy.sh pfsense-mock 90
 
 lab-full-down:
-	docker compose -f lab/docker-compose.yml --profile full down -v
+	docker compose --env-file lab/.env -f lab/docker-compose.yml --profile full down -v
 
 lab-seed-misp:
 	bash lab/scripts/seed-misp.sh

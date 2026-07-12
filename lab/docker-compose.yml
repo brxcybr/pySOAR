@@ -31,6 +31,7 @@ services:
       - pysoar-secrets:/app/secrets
     environment:
       PYSOAR_MOCK_INTEGRATIONS: ${PYSOAR_MOCK_INTEGRATIONS:-1}
+      PYSOAR_MOCK_ANALYZERS: ${PYSOAR_MOCK_ANALYZERS:-1}
       PYSOAR_SECRETS_DIR: /app/secrets
     command: ["--serve-api", "--host", "0.0.0.0", "--port", "8088"]
     profiles: ["full"]
@@ -39,7 +40,8 @@ services:
     build:
       context: ./mocks/pfsense
     ports:
-      - "8080:8080"
+      # Host 18080 avoids clash with other local labs on 8080; container still listens on 8080
+      - "18080:8080"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
       interval: 5s

@@ -26,12 +26,14 @@ Services in `--profile full`:
 | Service | Port | Purpose |
 |---|---|---|
 | `pysoar-api` | 8088 | FastAPI REST server |
-| `pfsense-mock` | 8080 | pfSense API stub |
+| `pfsense-mock` | 18080→8080 | pfSense API stub (host 18080 avoids clash with other local labs) |
 | `misp-mock` | 8082 | MISP API stub |
 | `crowdsec-mock` | 8081 | CrowdSec LAPI stub |
 | `webhook-sink` | 9000 | Webhook receiver |
 
 Use `LAB_PROFILE=full make bootstrap` to install `lab/config/full.yaml` integration configs.
+
+For HTTP-level testing (real clients, stub servers), set `PYSOAR_MOCK_INTEGRATIONS=0` in `lab/.env` while keeping `PYSOAR_MOCK_ANALYZERS=1` unless you supply vendor analyzer keys.
 
 ## Quick start
 
@@ -41,6 +43,17 @@ make lab-up      # bootstrap configs + start containers
 make lab-test    # run test playbook once
 make lab-down    # tear down
 ```
+
+## Privacy
+
+Do **not** commit:
+
+- `lab/.env`
+- `secrets/`
+- `certs/`
+- generated `config/*.yaml` (templates stay tracked)
+
+These paths are gitignored. Keep real hostnames, LAN topology, and credentials in a private homelab/ops repo.
 
 ## Bootstrap
 
@@ -56,10 +69,17 @@ lab/
 ├── docker-compose.yml
 ├── .env.example
 ├── config/lab.yaml
-├── mocks/pfsense/     # HTTP mock service
+├── config/full.yaml
+├── mocks/
+│   ├── pfsense/
+│   ├── misp/
+│   ├── crowdsec/
+│   └── webhook-sink/
 └── scripts/
     ├── bootstrap.sh
-    └── wait-healthy.sh
+    ├── wait-healthy.sh
+    ├── seed-misp.sh
+    └── generate-certs.sh
 ```
 
 ## Full network lab

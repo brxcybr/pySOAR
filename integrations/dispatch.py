@@ -125,7 +125,9 @@ def merge_result(shared_data, function_name, result, integration_returns=None):
     data = ctx.raw
 
     output_key = function_output_keys().get(function_name)
-    if output_key and not isinstance(result, dict):
+    # Bare bools are success flags, not observable/output values (avoids
+    # stomping keys like feed_id with True from enable_* actions).
+    if output_key and not isinstance(result, (dict, bool)):
         data[output_key] = result
         ctx.sync_from_legacy(source=function_name)
         return data

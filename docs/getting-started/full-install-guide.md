@@ -105,8 +105,8 @@ make test
 ## Known limitations
 
 - The curses TUI is functional but not complete (CLI is recommended for automation).
-- Full network lab (real pfSense in GNS3) requires manual topology setup — see the full install guide.
-- REST API and web UI are planned but not yet implemented.
+- Full network lab (real firewall VM in GNS3) requires manual topology setup — see the GNS3 / full install docs.
+- Web UI is not yet implemented (REST API is available via `--serve-api`).
 
 ## License
 

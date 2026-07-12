@@ -325,17 +325,19 @@ class PfsenseFunction:
         if self.rules is None:
             self.read_firewall_rule()
         for rule in self.rules:
-            if rule.source_address and rule.destination_address:
-                src_network = rule.source_address
-                dst_network = rule.destination_address
+            source_address = getattr(rule, 'source_address', None)
+            destination_address = getattr(rule, 'destination_address', None)
+            if source_address and destination_address:
+                src_network = source_address
+                dst_network = destination_address
                 if self.is_in_network_range(ip, src_network) or self.is_in_network_range(ip, dst_network):
                     return rule
-            elif rule.source_address:
-                src_network = rule.source_address
+            elif source_address:
+                src_network = source_address
                 if self.is_in_network_range(ip, src_network):
                     return rule
-            elif rule.destination_address:
-                dst_network = rule.destination_address
+            elif destination_address:
+                dst_network = destination_address
                 if self.is_in_network_range(ip, dst_network):
                     return rule
         return None
@@ -565,6 +567,18 @@ class FirewallRule:
         self.extract_time_data()
 
     def extract_addr_data(self):
+        # Normalize flat mock/API payloads (src/dst) into nested source/destination.
+        if not isinstance(self.source, dict):
+            flat_src = self.rule_data.get('src') if isinstance(self.rule_data, dict) else None
+            self.source = {'address': flat_src} if flat_src not in (None, '', 'any') else {}
+            if flat_src == 'any':
+                self.source = {'any': True}
+        if not isinstance(self.destination, dict):
+            flat_dst = self.rule_data.get('dst') if isinstance(self.rule_data, dict) else None
+            self.destination = {'address': flat_dst} if flat_dst not in (None, '', 'any') else {}
+            if flat_dst == 'any':
+                self.destination = {'any': True}
+
         if self.source.get('address', None):
             self.source_address = self.source['address']
         if self.source.get('port', None):
@@ -583,14 +597,16 @@ class FirewallRule:
             self.destination_any = self.destination['any']
         
     def extract_time_data(self):
-        if self.updated.get('time', None):
-            self.updated_time = self.updated['time']
-        if self.updated.get('username', None):
-            self.updated_username = self.updated['username']
-        if self.created.get('time', None):
-            self.created_time = self.created['time']
-        if self.created.get('username', None):
-            self.created_username = self.created['username']
+        updated = self.updated if isinstance(self.updated, dict) else {}
+        created = self.created if isinstance(self.created, dict) else {}
+        if updated.get('time', None):
+            self.updated_time = updated['time']
+        if updated.get('username', None):
+            self.updated_username = updated['username']
+        if created.get('time', None):
+            self.created_time = created['time']
+        if created.get('username', None):
+            self.created_username = created['username']
 
     def format_rule(self):
         """Format the rule data."""
@@ -619,7 +635,6 @@ class FirewallRule:
         
     @staticmethod
     def new_block_rule(
-            self,
             src, 
             src_port, 
             dst, 
@@ -637,7 +652,6 @@ class FirewallRule:
     
     @staticmethod
     def new_pass_rule(
-            self, 
             src, 
             src_port, 
             dst, 

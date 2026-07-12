@@ -163,15 +163,22 @@ cython_debug/
 *.log
 api_endpoints.py
 certs/*
-config/misp.yaml
-config/pfsense.yaml
+# Runtime integration configs (templates are tracked; lab bootstrap creates these)
+config/*.yaml
+!config/*.template.yaml
 secrets/
 lab/.env
 PySOAR.audit.jsonl
 pysoar_state.db*
-README_LOCAL.md 
+README_LOCAL.md
 feeds/
 playbooks/*
 !playbooks/test.yaml
 !playbooks/playbook_template.yaml
 practicum.code-workspace
+# Local/homelab topology notes and private inventories — never publish
+**/hosts.local.yml
+**/inventory.local*
+*.pem
+*.key
+!lab/**/*.example

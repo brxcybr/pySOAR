@@ -2,6 +2,20 @@
 
 All notable changes to PySOAR are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Docker image now packages `analyzers/` and `sensors/` (API `/analyzers` no longer 500s)
+- MISP lab mock returns a PyMISP-parseable version and enough feed/event endpoints for HTTP-level playbook runs
+- `enable_threat_feed` returns a real feed id instead of `True` (which was stomping `shared_data['feed_id']`)
+- Dispatch no longer maps bare boolean success flags onto named output keys
+- `FirewallRule.new_block_rule` / `new_pass_rule` no longer shift arguments via a bogus `self` parameter
+- Firewall rule parsing tolerates flat `src`/`dst` payloads used by the pfSense API and lab mock
+
+### Changed
+- Full Docker lab: host-publish pfSense mock on `18080` (container still `8080`) to avoid clashes with other local services
+- Lab Makefile targets pass `--env-file lab/.env`; API service honors `PYSOAR_MOCK_ANALYZERS`
+
 ## [0.8.0] - 2026-07-02
 
 ### Security

@@ -1,0 +1,59 @@
+misp:
+  enabled: true
+  url: "http://misp-mock:8082"
+  api_key: "lab-misp-key"
+  ssl: false
+  verifycert: false
+  accepts:
+    - ip-dst
+    - domain
+  returns:
+    - ip-dst
+    - domain
+  playbook_functions:
+    - enable_threat_feed
+    - get_misp_event_by_type
+
+pfsense:
+  enabled: true
+  url: "http://pfsense-mock:8080"
+  api_key: "lab-test-key"
+  ssl: false
+  verifycert: false
+  default_interface: "wan"
+  accepts:
+    - ip-dst
+  returns:
+    - ip-dst
+  playbook_functions:
+    - add_firewall_rule
+
+crowdsec:
+  enabled: true
+  url: "http://crowdsec-mock:8081"
+  api_key: "lab-crowdsec-key"
+  ssl: false
+  verifycert: false
+  accepts:
+    - ip-dst
+  returns:
+    - ip-dst
+  playbook_functions:
+    - ban_ip
+    - list_decisions
+
+webhook:
+  enabled: true
+  url: "http://webhook-sink:9000/notify"
+  api_key: ""
+  ssl: false
+  verifycert: false
+  default_format: "generic"
+  accepts:
+    - message
+    - ip-dst
+  returns:
+    - webhook-status
+  playbook_functions:
+    - send_webhook
+    - notify_playbook_result

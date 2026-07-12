@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenIOC xmlns="http://openioc.org/schemas/OpenIOC_1.1">
+  <short_description>Sample OpenIOC</short_description>
+  <criteria>
+    <Indicator operator="OR">
+      <AddressItem>
+        <Content>198.51.100.10</Content>
+      </AddressItem>
+    </Indicator>
+  </criteria>
+</OpenIOC>

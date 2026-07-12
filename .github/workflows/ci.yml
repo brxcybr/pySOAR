@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'cursor/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -r requirements-api.txt
+          pip install -e .
+      - name: Run tests
+        run: python3 -m pytest tests/ -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt -r requirements-dev.txt -r requirements-api.txt
+          pip install -e .
+          pip install pip-audit
+      - name: Audit dependencies for known vulnerabilities
+        run: python -m pip_audit --skip-editable
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install bootstrap dependencies
+        run: pip install PyYAML cryptography
+      - name: Build Docker image
+        run: docker build -t pysoar:ci .
+      - name: Lab smoke test
+        run: |
+          cp lab/.env.example lab/.env
+          make lab-up
+          docker compose -f lab/docker-compose.yml --profile lab run --rm pysoar --run-playbook test --once
+          make lab-down

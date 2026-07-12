@@ -1,0 +1,89 @@
+services:
+  pysoar:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - ../config:/app/config
+      - ../playbooks:/app/playbooks
+      - pysoar-secrets:/app/secrets
+    environment:
+      PYSOAR_MOCK_INTEGRATIONS: ${PYSOAR_MOCK_INTEGRATIONS:-1}
+      PYSOAR_MASTER_KEY: ${PYSOAR_MASTER_KEY:-}
+      PYSOAR_SECRETS_DIR: /app/secrets
+    depends_on:
+      pfsense-mock:
+        condition: service_healthy
+    command: ["--run-playbook", "test", "--once"]
+    profiles: ["lab", "default"]
+
+  pysoar-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    working_dir: /app
+    ports:
+      - "8088:8088"
+    volumes:
+      - ../config:/app/config
+      - ../playbooks:/app/playbooks
+      - pysoar-secrets:/app/secrets
+    environment:
+      PYSOAR_MOCK_INTEGRATIONS: ${PYSOAR_MOCK_INTEGRATIONS:-1}
+      PYSOAR_MOCK_ANALYZERS: ${PYSOAR_MOCK_ANALYZERS:-1}
+      PYSOAR_SECRETS_DIR: /app/secrets
+    command: ["--serve-api", "--host", "0.0.0.0", "--port", "8088"]
+    profiles: ["full"]
+
+  pfsense-mock:
+    build:
+      context: ./mocks/pfsense
+    ports:
+      # Host 18080 avoids clash with other local labs on 8080; container still listens on 8080
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles: ["lab", "default", "full"]
+
+  misp-mock:
+    build:
+      context: ./mocks/misp
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles: ["full"]
+
+  crowdsec-mock:
+    build:
+      context: ./mocks/crowdsec
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles: ["full"]
+
+  webhook-sink:
+    build:
+      context: ./mocks/webhook-sink
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles: ["full"]
+
+volumes:
+  pysoar-secrets:

@@ -1,9 +1,11 @@
 pfsense:
   enabled: True
   url: "{PFSENSE_URL}" # update with local pfSense API URL
-  api_key: "{API_KEY}" # update with local pfSense API key
+  api_key: "{API_KEY}" # Or set api_key_secret: true after `python pysoar.py --set-secret pfsense`
+  # api_key_secret: true
   ssl: False         # Set to `True` to enable SSL
   verifycert: False  # Set to `True` to verify pfSense Certificate
+  default_interface: "wan"  # Interface for generated block rules
   accepts:
     - ip-dst
   returns:

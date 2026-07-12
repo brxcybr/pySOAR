@@ -1,0 +1,2 @@
+[pysoar_hosts]
+pysoar.lab.local ansible_user=debian ansible_become=true

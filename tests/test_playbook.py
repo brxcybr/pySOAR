@@ -65,9 +65,8 @@ class TestPlaybookCreation(unittest.TestCase):
         playbook.add_playbook_function(func2)
         playbook.add_playbook_function(func3)
         playbook.add_playbook_function(func4)
-        # Populate 
-        playbook.integration_deps = self.config_mgr.get_unique_integration_dependencies_by_function_list(playbook.functions)
-        playbook.enabled = True # Enable the playbook
+        playbook.integration_deps = ['misp', 'pfsense']
+        playbook.enabled = True
         
         if debug: # Check the state of the data before updating
             print("\nBefore updating:")

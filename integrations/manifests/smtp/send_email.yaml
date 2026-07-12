@@ -1,0 +1,16 @@
+name: send_email
+integration: smtp
+category: responder
+play_type: responder
+risk: low
+producer: false
+method: send_email
+description: Send an email notification through any SMTP relay.
+retries: 2
+retry_backoff_seconds: 2
+inputs:
+  - name: message
+    type: text
+    maps_to: message
+outputs:
+  - email-status

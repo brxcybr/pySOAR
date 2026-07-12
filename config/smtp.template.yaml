@@ -1,0 +1,20 @@
+smtp:
+  enabled: false
+  # SMTP relay host or host:port (e.g. mail.example.com:587)
+  url: "{SMTP_HOST}"
+  # SMTP password; prefer `python3 pysoar.py --set-secret smtp` for encrypted storage
+  api_key: "{SMTP_PASSWORD}"
+  ssl: true
+  verifycert: true
+  username: "{SMTP_USERNAME}"
+  from_addr: "pysoar@example.com"
+  to_addrs:
+    - "operator@example.com"
+  starttls: true
+  accepts:
+    - message
+  returns:
+    - email-status
+  playbook_functions:
+    - send_email
+    - notify_playbook_result

@@ -1317,7 +1317,10 @@ class PlaybookFunction:
         if self.name.startswith('analyze:') or self.name == 'analyze':
             return self._execute_analyzers(shared_data)
 
-        from integrations.dispatch import producer_functions, build_kwargs, merge_result, is_success, find_integration_for_function
+        # Only producer_functions is imported here; the dispatch helpers used
+        # below come from the module-level import so tests can patch them via
+        # the `classes` namespace.
+        from integrations.dispatch import producer_functions
 
         if self.data_dependencies and self.name not in producer_functions():
             needs = {dep: shared_data.get(dep) for dep in self.data_dependencies}

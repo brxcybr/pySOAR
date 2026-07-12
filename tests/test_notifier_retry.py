@@ -55,7 +55,7 @@ class TestSmtpNotifier(unittest.TestCase):
 class TestManifestRetries(unittest.TestCase):
     @patch('time.sleep')  # don't actually wait during backoff
     @patch.object(ConfigurationManager, 'resolve_callable')
-    @patch('integrations.dispatch.find_integration_for_function')
+    @patch('classes.find_integration_for_function')
     def test_retries_until_success(self, mock_find, mock_resolve, _sleep):
         from core.manifests import ActionManifest, ManifestRegistry
 
@@ -93,7 +93,7 @@ class TestManifestRetries(unittest.TestCase):
 
     @patch('time.sleep')
     @patch.object(ConfigurationManager, 'resolve_callable')
-    @patch('integrations.dispatch.find_integration_for_function')
+    @patch('classes.find_integration_for_function')
     def test_exhausted_retries_route_to_on_fail(self, mock_find, mock_resolve, _sleep):
         from core.manifests import ActionManifest, ManifestRegistry
 
